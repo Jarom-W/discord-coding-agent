@@ -4,7 +4,7 @@ Converse with the **real Codex CLI on an always-on Raspberry Pi through Discord*
 
 This is an independent community project, **not an official OpenAI or Discord product**. The display label is configurable (for example, **TARS**). Availability depends on the Pi, internet, Discord and valid Codex authentication. There is no offline inference, unlimited usage, or guarantee that a subscription covers every workload.
 
-Version 0.1 supports one owner, server, private text channel, repository and active task. It uses Python/asyncio, discord.py's outbound Gateway and `codex app-server` JSON lines over local stdin/stdout. It needs no public server, webhook, tunnel or router port forwarding. It stays available for your messages; it does not invent tasks or run a schedule.
+Version 0.2 supports one owner/server, **channel-specific repositories and named sessions**, and one active coding task across the bot. It uses Python/asyncio, discord.py's outbound Gateway and `codex app-server` JSON lines over local stdin/stdout. It needs no public server, webhook, tunnel or router port forwarding. It stays available for your messages; it does not invent coding tasks or run an autonomous coding schedule. An optional local updater deploys CI-verified merges when the bot is idle.
 
 ## Quickstart
 
@@ -51,12 +51,48 @@ Manual mode displays green **Approve** and red **Deny** buttons for requests tha
 
 `!new auto` selects Codex's automatic approval reviewer with `on-request` and `workspace-write`. Eligible requests may be approved **or rejected**. Effective process and thread settings are checked before submission; this does not prove every tool's runtime behavior. Unsupported settings fail clearly. `!new manual` is an explicit alternative. Session/mode switching is rejected while busy. Asking the model in prose to “open a new chat” never changes the bridge's active thread.
 
+## Repositories, channels and named sessions
+
+**In Discord**, after upgrading to 0.2.0:
+
+```text
+!dirs
+!dirs ~/work
+!repo ~/work/my-project
+!name backend fixes
+!new auto release planning
+!sessions
+!session backend fixes
+```
+
+Replace `~/work/my-project` with an existing Git working-tree root on the Pi. `!dirs` shows the allowed roots, which default to the initial repository's parent. Set `WORKSPACE_ROOTS` locally to allow additional project directories. Paths may contain spaces; session names are case-insensitive and may also contain spaces. Each saved session keeps its repository, thread, approval mode and last result, including after restart.
+
+For a second project, create another private text channel **in the same server**, grant the same bot its four required channel permissions, and send `!repo ~/work/another-project` there. No second application, token or process is needed. Names and selected conversations are separate per channel. Only the configured owner can operate the bot; coding work is serialized across all channels. See [workspace setup and recovery](docs/workspaces.md).
+
+## Automatic updates after merges
+
+GitHub Actions already tests pushes and PRs. The opt-in updater checks GitHub over outbound HTTPS, requires successful `ci.yml` **push** CI for the exact `main` commit, prepares a separate release/venv, waits for all coding work to finish, then restarts the managed bot. It checks Gateway readiness and restores the previous unit if startup fails. Credentials and sessions stay in their existing private locations.
+
+**On the Pi**, first [manually update to 0.2.0](docs/service.md#update-without-losing-credentials-or-conversation), install/start the managed bot service, and confirm `!ping`. Then:
+
+```bash
+cd "$HOME/services/discord-coding-agent"
+.venv/bin/discord-coding-agent deploy install --repository Jarom-W/discord-coding-agent
+.venv/bin/discord-coding-agent deploy check
+.venv/bin/discord-coding-agent deploy enable
+.venv/bin/discord-coding-agent deploy status
+```
+
+Use your own `OWNER/REPO` if deploying a fork: **merges in that repository authorize code to run as your Linux user**. The default poll interval is five minutes plus jitter; deployment waits indefinitely while a coding task is active. These commands enable updates only for the selected managed instance. No GitHub runner, Pi login secret in Actions, public endpoint, or Codex CLI upgrade is required. Read [deployment, rollback and troubleshooting](docs/deployment.md) before enabling.
+
 ## Guides
 
 - [Discord application, intents, permissions and first ping](docs/discord.md)
 - [Pi installation, Codex authentication and repository setup](docs/pi-codex.md)
 - [End-to-end walkthrough, including restart and phone use](docs/walkthrough.md)
 - [Commands, configuration and timeout reference](docs/reference.md)
+- [Directory browsing, channel workspaces and named sessions](docs/workspaces.md)
+- [CI-gated automatic deployment and rollback](docs/deployment.md)
 - [systemd, updates, rollback and uninstall](docs/service.md)
 - [Troubleshooting and recovery](docs/troubleshooting.md)
 - [Architecture and reliability](docs/architecture.md)

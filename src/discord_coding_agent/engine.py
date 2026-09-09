@@ -9,11 +9,13 @@ import time
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Protocol
 
 from . import protocol
-from .config import Config, discover_codex
+from .config import Config, discover_codex, repository_identity
 from .errors import BridgeError, LimitError, log_error
+from .locks import Lease
 from .rpc import Json, Rpc
 from .state import MAX_RESULT, StateStore
 
@@ -30,7 +32,7 @@ HELP = """Ordinary text starts/continues the saved Codex conversation. One activ
 !answer ID text — answer one question; for multiple: !answer ID {"question_id":["answer"],"other_id":["answer"]}
 !stop — interrupt, then stop the owned child if necessary; does not undo edits/external effects
 !last — retrieve the last saved result
-Only !new switches the bridge conversation. Asking Codex to “open a new chat” in prose does not switch it.
+Use !new, !session or !repo to switch through the bridge. Asking Codex to “open a new chat” in prose does not switch it.
 Ordinary text uses the configured task limit (default: none). !run overrides it for one task, including initialization and human wait; it cannot change active work. Natural-language time rules are passed to Codex; use !run for an enforced timer. Approval and connection timeouts still apply.
 Text and repository paths only; attachments are rejected. Internet and valid Codex authentication required. Manual mode reviews sandbox escalations, not every edit. The service waits for your messages; no autonomous schedule."""
 
@@ -90,6 +92,7 @@ class Engine:
         *,
         connection_only: bool = False,
         rpc_factory: Callable[..., Rpc] = Rpc,
+        activity_path: Path | None = None,
     ) -> None:
         self.config, self.store, self.sink = config, store, sink
         self.state = store.load()
@@ -113,6 +116,7 @@ class Engine:
         self.done: asyncio.Future[Json] | None = None
         self.timers: dict[str, asyncio.Task[None]] = {}
         self.seen = set(self.state.seen_messages)
+        self.activity = Lease(activity_path or config.state_dir / "activity.lock")
 
     @property
     def busy(self) -> bool:
@@ -179,6 +183,11 @@ class Engine:
             )
             return
         # No await between the busy check, durable reservation and task creation.
+        if not self.activity.acquire():
+            self.sink.text(
+                "Busy: another channel is working or maintenance is in progress. Your message was NOT submitted. Use !status, wait, or !stop."
+            )
+            return
         self.task_id = uuid.uuid4().hex
         self.started = time.monotonic()
         self.elapsed = None
@@ -192,7 +201,12 @@ class Engine:
             "task_limit_seconds": task_limit,
         }
         self.state.interrupted = False
-        self.save()
+        try:
+            self.save()
+        except BaseException:
+            self.state.active = None
+            self.activity.close()
+            raise
         self.transition("initializing")
         log.info("task=%s task_limit_seconds=%g (0=unlimited)", self.task_id, task_limit)
         self.worker = asyncio.create_task(self._run(content), name=f"coding-{self.task_id}")
@@ -299,6 +313,15 @@ class Engine:
         )
 
     async def _prepare(self) -> None:
+        if not any(self.config.repo.is_relative_to(root) for root in self.config.roots):
+            raise BridgeError(
+                "This saved repository is outside WORKSPACE_ROOTS. Select an allowed repository with !repo or update the roots locally."
+            )
+        identity = await asyncio.to_thread(repository_identity, self.config.repo)
+        if identity != self.store.identity:
+            raise BridgeError(
+                "Repository identity changed; this session was not resumed. Inspect the repository and workspace recovery guide."
+            )
         executable = discover_codex(self.config.codex)
         await protocol.version(executable, self.config.timeouts.initialization)
         rpc = self.rpc_factory(self.config.timeouts, self.event, self.request, self.disconnected)
@@ -324,6 +347,12 @@ class Engine:
         self.save()
 
     async def _run(self, prompt: str) -> None:
+        try:
+            await self._execute(prompt)
+        finally:
+            self.activity.close()
+
+    async def _execute(self, prompt: str) -> None:
         self.done = asyncio.get_running_loop().create_future()
         self.messages.clear()
         self.items.clear()
@@ -763,6 +792,7 @@ class Engine:
             await worker
         except asyncio.CancelledError:
             # Cancellation can happen before _run has entered its try/finally.
+            self.activity.close()
             self.state.interrupted = True
             self.state.last_interruption = self.state.active
             self.state.active = None

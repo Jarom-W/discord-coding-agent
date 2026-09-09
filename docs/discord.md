@@ -47,7 +47,7 @@ Use a normal text channel, not a DM, thread, forum post, voice channel or announ
 
 Enable **User Settings → Advanced → Developer Mode**. Right-click (or long-press / use the context menu on mobile) and choose **Copy User ID** on your own profile, **Copy Server ID** on the server, and **Copy Channel ID** on the text channel. See Discord's [ID instructions](https://support.discord.com/hc/en-us/articles/206346498).
 
-Use those decimal numbers for `DISCORD_OWNER_ID`, `DISCORD_GUILD_ID`, and `DISCORD_CHANNEL_ID`. Usernames, role IDs, channel names, application IDs and invite links are different values. The owner ID is your account, not the bot's account.
+Use those decimal numbers for `DISCORD_OWNER_ID`, `DISCORD_GUILD_ID`, and the initial `DISCORD_CHANNEL_ID`. Usernames, role IDs, channel names, application IDs and invite links are different values. The owner ID is your account, not the bot's account. Additional channels can be bound from Discord after first setup.
 
 ## 8. Enter configuration — on the Pi
 
@@ -72,11 +72,15 @@ Enter the values locally. The token input is hidden. Setup validates the reposit
 
 Use Ctrl+C on the Pi to stop the foreground test. Then follow the normal startup in the README and the [walkthrough](walkthrough.md).
 
+## Add another project channel
+
+Create another private normal text channel **in this same server** and repeat the channel/category permission grants in step 6 for the existing bot. As the configured owner, send `!ping`, `!dirs`, then `!repo ~/work/your-other-project`. No extra application, invite, token, channel-ID edit or process is needed. `!sessions`, `!new manual NAME` and `!session NAME` manage that channel's conversations. See [the full workspace guide](workspaces.md). One coding task runs at a time across all channels; `!status` identifies the active channel.
+
 ## If ping does not work
 
 - **Invalid token:** obtain a fresh token under Bot, not General Information/OAuth2; update local config and restart. A successful `doctor --discord` checks REST authentication and channel lookup without sending messages.
 - **Missing intent / wrong application:** revisit step 3. An empty message body is also a symptom of Message Content Intent problems.
-- **Incorrect IDs:** verify your user, server and normal text-channel IDs. Unauthorized or wrong-channel messages are intentionally ignored.
+- **Incorrect IDs:** verify your user/server and initial text-channel IDs. Other users/servers are ignored. In an additional private channel, use an explicit command such as `!repo PATH` first; ordinary unbound-channel text is ignored.
 - **Invisible channel:** check bot membership and category/channel View Channel overrides.
 - **No send or no long reply:** check Send Messages, Read Message History and Attach Files. The journal reports missing permissions; `!last` recovers the saved result after they are fixed.
 - **Network:** the Pi needs outbound internet/WebSocket and HTTPS connectivity. No incoming ports, router forwarding or **Interactions Endpoint URL** is used; leave that endpoint blank for this app.

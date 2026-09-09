@@ -95,3 +95,11 @@ With the service enabled, running and linger configured, close your SSH connecti
 ## 9. Separate deliberate reboot test
 
 Only after the disconnect test, and while no task is running, deliberately reboot the Pi through your normal administration method. Wait for it to boot and reconnect. Send `!ping` from the phone, then check `!status`. If absent, inspect boot service state, linger and Wi-Fi after reconnecting by SSH. Record this result separately from merely closing the laptop.
+
+## 10. Channel workspaces and session return
+
+**In Discord:** use `!name demo continuity`, `!new manual second conversation`, and `!sessions`. Return with `!session demo continuity` and ask about the remembered word. Create another private normal text channel in the same server, grant the existing bot its four permissions, and send `!repo ~/work/codex-bridge-demo` there. Expect a separate session/thread. While a task runs in either channel, an ordinary message in the other must be rejected as not submitted; `!status` identifies the active channel and `!stop` can interrupt it. Restart idle and check both selections persist. See [workspace setup](workspaces.md).
+
+## 11. Optional automatic update acceptance
+
+Use a disposable test instance and your own public fork. Follow [deployment setup](deployment.md), merge a harmless change to main, and wait for successful main push CI. `deploy check` should deploy the matching SHA, then `!ping`, `!status` and a read-only follow-up should work. Repeat while a task is active: the prepared update must defer until idle. This is separate from the unit tests and is not claimed as already exercised on a physical Pi or production bot.

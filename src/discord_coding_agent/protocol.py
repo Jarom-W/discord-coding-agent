@@ -81,7 +81,7 @@ async def initialize(rpc: Rpc) -> None:
             "clientInfo": {
                 "name": "discord_coding_agent",
                 "title": "Discord Coding Agent (community)",
-                "version": "0.1.1",
+                "version": "0.2.0",
             },
             "capabilities": {"experimentalApi": True, "optOutNotificationMethods": OPT_OUT},
         },

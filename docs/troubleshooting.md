@@ -16,6 +16,11 @@ journalctl --user -u discord-coding-agent.service -n 200 --no-pager -o short-iso
 | Symptom | Check and recovery |
 | --- | --- |
 | No response to `!ping` | Follow the ordered [Discord guide](discord.md): token, same application, saved Message Content Intent, owner/guild/channel IDs, bot membership, text-channel and category overrides. |
+| Wrong/stale repository or chat | Use `!status`, `!sessions`, `!session NAME` or `!repo PATH` in that channel. Only bridge commands change routing. Update to 0.2.0 for channel workspaces; follow [workspace setup](workspaces.md). |
+| Directory outside roots / non-Git folder | `!dirs` lists allowed host roots. Configure `WORKSPACE_ROOTS` locally (including the initial repo), then restart idle. Selection requires an existing Git working-tree root; create/clone it locally first. Symlink escapes are refused. |
+| Busy in another channel | `!status` reports the active coding channel. Work is serialized across the bot; the rejected message was not submitted. Wait, or `!stop` from a bound channel. Selection changes also wait during deployment. |
+| Old saved repository identity | Restore its original Git directory or deliberately start a new session with `!repo --fresh PATH`. Old history is preserved and never silently rebound to replacement files. |
+| Update does not arrive / failed deployment | Check `deploy status`, main's exact `ci.yml` push run, timer/user-bus/linger, bot readiness and updater journal. See [deployment troubleshooting](deployment.md). PR success alone is insufficient; active tasks defer restarts. |
 | Invalid token | Reset the bot token, update private config locally, restart. Do not send old or new tokens to an issue. |
 | `PrivilegedIntentsRequired` | Enable and save Message Content Intent on the token's application. Do not enable member/presence intents. |
 | Bot invisible or cannot send attachments | Grant View Channels, Send Messages, Read Message History and Attach Files on that channel/category. Long replies require attachment permission. Fix access then `!last`. |
@@ -50,6 +55,8 @@ journalctl --user -u discord-coding-agent.service -n 200 --no-pager -o short-iso
 Stop the bridge first and copy the entire state/config directories to a private backup, as shown in the service guide. Do not edit/delete an active lock or publish state JSON. A corrupt state file is left unchanged. Unknown schemas are copied to `state.json.backup-TIMESTAMP` and rejected; use the release that understands that schema. This project does not import prototype state automatically.
 
 For a repository mismatch, restore the original path/Git directory if possible, or select a new `STATE_DIR` for the new repository. Do not change the saved repository identity by hand to suppress a warning; the old conversation may refer to different files.
+
+For the workspace catalog, back up `workspaces.json` together with all `sessions/` state. Unknown catalog schemas are backed up; malformed catalogs are left untouched. `!repo --fresh PATH` can create a new conversation for a deliberately recreated repository, but it does not repair corrupted catalog JSON. Restore a known-good catalog/state set or use a new state directory. See [workspace recovery](workspaces.md).
 
 If you deliberately abandon an unusable bridge state, preserve the directory, choose a new empty `STATE_DIR` outside repositories in private configuration, and restart. This starts a fresh bridge conversation without deleting Codex authentication, rollouts or the repository. Review uncertain edits before the first request. Restoring an older state file also restores older dedup/delivery information, so duplicates are possible; inspect the channel and never replay tasks automatically.
 

@@ -224,6 +224,15 @@ config.toml
 !.env.example
 state.json
 process.lock
+activity.lock
+workspaces.json
+ready.json
+deployment.toml
+deployment.json
+updater.lock
+candidate.json
+prepared.json
+deployment-backup.json
 *.backup-*
 *.log
 logs/

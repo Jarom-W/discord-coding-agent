@@ -2,7 +2,9 @@
 
 import asyncio
 import io
+import json
 import logging
+import os
 from typing import Any
 
 import discord
@@ -12,19 +14,25 @@ from .config import Config
 from .delivery import Delivery
 from .engine import Engine, Origin, Pending
 from .errors import BridgeError, log_error
-from .state import StateStore
+from .state import StateStore, atomic_write
+from .workspaces import Workspaces
 
 log = logging.getLogger(__name__)
 
 
 class DiscordTransport:
-    def __init__(self, client: "BridgeClient") -> None:
+    def __init__(self, client: "BridgeClient", channel_id: int | None = None) -> None:
         self.client = client
+        self.channel_id = channel_id
 
     async def channel(self) -> discord.TextChannel:
         await self.client.wait_until_ready()
-        channel = self.client.get_channel(self.client.config.channel_id)
-        if not isinstance(channel, discord.TextChannel):
+        channel = self.client.get_channel(self.channel_id or self.client.config.channel_id)
+        if (
+            not isinstance(channel, discord.TextChannel)
+            or channel.guild.id != self.client.config.guild_id
+            or channel.type != discord.ChannelType.text
+        ):
             raise BridgeError(
                 "Configured channel is not an accessible server text channel; check IDs and overrides."
             )
@@ -82,9 +90,9 @@ class DiscordTransport:
             message = await channel.fetch_message(message_id)
             if message.author == self.client.user:
                 await message.edit(view=None)
-            self.client.forget_control(message_id)
+            self.client.forget_control(message_id, self.channel_id)
         except discord.NotFound:
-            self.client.forget_control(message_id)
+            self.client.forget_control(message_id, self.channel_id)
 
     async def typing(self) -> None:
         channel = await self.channel()
@@ -101,41 +109,97 @@ class BridgeClient(discord.Client):
             intents=intents, allowed_mentions=discord.AllowedMentions.none(), max_messages=128
         )
         self.config = config
-        self.transport = DiscordTransport(self)
-        self.delivery = Delivery(
-            self.transport,
-            config.timeouts.delivery,
-            lambda key: key in self.engine.pending,
-            lambda key, message: self.engine.bind(key, message),
-            self.delivered,
+        self.store = store
+        self.deliveries: dict[int, Delivery] = {}
+        self.delivery_started = False
+        self.workspaces = Workspaces(
+            config, store, self.channel_delivery, connection_only=connection_only
         )
-        self.engine = Engine(config, store, self.delivery, connection_only=connection_only)
+        self.workspaces.engine(self.workspaces.sessions["default"])
         self.cosmetic_worker: asyncio.Task[None] | None = None
         self.ready_once = False
         self.shutting_down = False
+        self.readiness(False)
+
+    @property
+    def engine(self) -> Engine:
+        """Configured channel's selection (legacy embedding API)."""
+        selected = self.workspaces.selected(self.config.channel_id)
+        return self.workspaces.engine(selected or self.workspaces.sessions["default"])
+
+    @property
+    def delivery(self) -> Delivery:
+        return self.channel_delivery(self.config.channel_id)
+
+    def readiness(self, ready: bool) -> None:
+        atomic_write(
+            self.store.directory / "ready.json",
+            json.dumps(
+                {
+                    "protocol": 1,
+                    "pid": os.getpid(),
+                    "invocation": os.environ.get("INVOCATION_ID", ""),
+                    "config": str(self.config.path),
+                    "ready": ready,
+                }
+            )
+            + "\n",
+        )
+
+    def channel_delivery(self, channel: int) -> Delivery:
+        if channel not in self.deliveries:
+
+            def valid(key: str) -> bool:
+                return any(key in e.pending for e in self.workspaces.channel_engines(channel))
+
+            def bind(key: str, message: int) -> bool:
+                engine = next(
+                    (e for e in self.workspaces.channel_engines(channel) if key in e.pending), None
+                )
+                return bool(engine and engine.bind(key, message))
+
+            delivery = Delivery(
+                DiscordTransport(self, channel),
+                self.config.timeouts.delivery,
+                valid,
+                bind,
+                self.delivered,
+            )
+            self.deliveries[channel] = delivery
+            if self.delivery_started:
+                delivery.start()
+        return self.deliveries[channel]
 
     async def setup_hook(self) -> None:
-        self.delivery.start()
+        self.delivery_started = True
+        for delivery in self.deliveries.values():
+            delivery.start()
         self.cosmetic_worker = asyncio.create_task(self.cosmetics())
 
     def delivered(self, result_id: str) -> None:
-        if result_id == self.engine.state.result_id:
-            self.engine.state.delivered = True
-            self.engine.save()
+        for engine in self.workspaces.engines.values():
+            if result_id == engine.state.result_id:
+                engine.state.delivered = True
+                engine.save()
 
-    def forget_control(self, message_id: int) -> None:
-        if message_id in self.engine.state.controls:
-            self.engine.state.controls.remove(message_id)
-            self.engine.save()
+    def forget_control(self, message_id: int, channel: int | None = None) -> None:
+        for engine in self.workspaces.channel_engines(channel or self.config.channel_id):
+            if message_id in engine.state.controls:
+                engine.state.controls.remove(message_id)
+                engine.save()
 
     async def on_ready(self) -> None:
-        self.engine.connected = True
+        self.readiness(False)
+        self.workspaces.connected = True
+        for engine in self.workspaces.engines.values():
+            engine.connected = True
         guild = self.get_guild(self.config.guild_id)
         channel = self.get_channel(self.config.channel_id)
         if (
             not guild
             or not isinstance(channel, discord.TextChannel)
             or channel.guild.id != guild.id
+            or channel.type != discord.ChannelType.text
         ):
             log.error(
                 "gateway=configuration_error; configured guild/channel inaccessible; check IDs and View Channels"
@@ -152,10 +216,20 @@ class BridgeClient(discord.Client):
             log.error("gateway=permissions_missing permissions=%s", ",".join(missing))
             return
         log.info("gateway=ready user_id=%s", self.user.id if self.user else None)
-        active_controls = {pending.message_id for pending in self.engine.pending.values()}
-        for message_id in list(self.engine.state.controls):
-            if message_id not in active_controls:
-                self.delivery.disable(message_id)
+        for selected_id in self.workspaces.channels.values():
+            if selected_id:
+                self.workspaces.engine(self.workspaces.sessions[selected_id])
+        for engine in self.workspaces.engines.values():
+            delivery = self.channel_delivery(engine.config.channel_id)
+            active_controls = {p.message_id for p in engine.pending.values()}
+            for message_id in list(engine.state.controls):
+                if message_id not in active_controls:
+                    delivery.disable(message_id)
+            if engine.state.last_result and not engine.state.delivered:
+                delivery.text(engine.state.last_result, result_id=engine.state.result_id)
+            for pending in list(engine.pending.values()):
+                if pending.message_id is None:
+                    delivery.request(pending)
         if not self.ready_once:
             self.ready_once = True
             self.delivery.text(
@@ -166,19 +240,39 @@ class BridgeClient(discord.Client):
                     else ""
                 )
             )
-        if self.engine.state.last_result and not self.engine.state.delivered:
-            self.delivery.text(self.engine.state.last_result, result_id=self.engine.state.result_id)
-        # Existing pending requests remain scoped to the same process and turn on reconnect.
-        for pending in list(self.engine.pending.values()):
-            if pending.message_id is None:
-                self.delivery.request(pending)
+
+        self.readiness(True)
 
     async def on_disconnect(self) -> None:
-        self.engine.connected = False
+        self.workspaces.connected = False
+        for engine in self.workspaces.engines.values():
+            engine.connected = False
+        self.readiness(False)
         log.warning("gateway=disconnected; coding task is independent")
 
     async def on_message(self, message: discord.Message) -> None:
-        if message.author.bot:
+        if message.author.bot or message.author.id != self.config.owner_id:
+            return
+        if message.guild is None or message.guild.id != self.config.guild_id:
+            return
+        if (
+            not isinstance(message.channel, discord.TextChannel)
+            or message.channel.type != discord.ChannelType.text
+        ):
+            return
+        if not message.guild.me:
+            return
+        permissions = message.channel.permissions_for(message.guild.me)
+        missing = [
+            name
+            for name in ["view_channel", "send_messages", "read_message_history", "attach_files"]
+            if not getattr(permissions, name)
+        ]
+        if missing:
+            log.warning("channel=%s permissions_missing=%s", message.channel.id, ",".join(missing))
+            self.delivery.text(
+                f"Channel {message.channel.id} is missing bot permissions: {', '.join(missing)}. Nothing was submitted. Check channel/category overrides."
+            )
             return
         origin = Origin(
             message.author.id,
@@ -187,13 +281,17 @@ class BridgeClient(discord.Client):
             message.id,
         )
         try:
-            await self.engine.message(
+            await self.workspaces.message(
                 origin, message.content, bool(message.attachments or message.stickers)
             )
         except Exception as exc:
             log_error(log, "discord-message", exc)
-            if self.engine.authorized(origin):
-                self.delivery.text(
+            if self.workspaces.permitted(origin):
+                self.channel_delivery(
+                    origin.channel
+                    if origin.channel in self.workspaces.channels
+                    else self.config.channel_id
+                ).text(
                     "Bridge could not safely process this message. Inspect the journal and !status before retrying."
                 )
 
@@ -218,7 +316,10 @@ class BridgeClient(discord.Client):
                 interaction.user.id, interaction.guild_id, interaction.channel_id or 0, message.id
             )
             try:
-                answer = self.engine.decide(
+                selected = self.workspaces.selected(origin.channel)
+                if not selected or not self.workspaces.permitted(origin):
+                    raise BridgeError("Invalid or expired control message for this channel.")
+                answer = self.workspaces.engine(selected).decide(
                     origin, parts[1], parts[2] == "approve", button_message=message.id
                 )
             except BridgeError as exc:
@@ -235,8 +336,9 @@ class BridgeClient(discord.Client):
     async def cosmetics(self) -> None:
         while True:
             await asyncio.sleep(8)
-            if self.engine.busy and self.is_ready():
-                await self.delivery.cosmetic()
+            active = self.workspaces.active()
+            if active and self.is_ready():
+                await self.channel_delivery(active.config.channel_id).cosmetic()
 
     async def on_error(self, event_method: str, *args: Any, **kwargs: Any) -> None:
         # discord.py's default error handler may log event arguments. Keep them private.
@@ -247,10 +349,11 @@ class BridgeClient(discord.Client):
             return
         self.shutting_down = True
         try:
-            await self.engine.close()
+            self.readiness(False)
+            await self.workspaces.close()
         finally:
             if self.cosmetic_worker:
                 self.cosmetic_worker.cancel()
                 await asyncio.gather(self.cosmetic_worker, return_exceptions=True)
-            await self.delivery.close()
+            await asyncio.gather(*(delivery.close() for delivery in self.deliveries.values()))
             await super().close()
