@@ -4,7 +4,7 @@ Version 0.1.0; evidence collected **2026-09-09**. A checked protocol/configurati
 
 | Component | Supported / checked baseline | Evidence and limits |
 | --- | --- | --- |
-| Python | `>=3.11,<3.15` | Default suite: **72 passed, 3 opt-in skips on each** of 3.11.16, 3.12.14, **3.13.15** and 3.14.7, Linux x86-64. CI includes all four minor versions. |
+| Python | `>=3.11,<3.15` | Default suite: **72 passed, 3 opt-in skips on each** of 3.11.16, 3.12.14, **3.13.15** and 3.14.7, Linux x86-64. The hosted GitHub Actions matrix also passed all four minor versions, including lint, typing, tests, build, lock-export verification and wheel installation. |
 | discord.py | 2.7.1 in `uv.lock` / runtime export | Adapter/unit tests; real Gateway, token, live button interaction and phone conversation were not exercised in the implementation environment. Package metadata permits compatible 2.x; reproducible installs use the lock. |
 | Codex CLI | **0.153.4 only** | Inspected installed executable/help and generated experimental JSON schemas. Exact version is checked before work; newer/older versions fail explicitly. No automatic CLI upgrade. |
 | Codex protocol | v2 methods in that CLI | Actual unauthenticated temporary-process checks passed: initialize, initialized, config/read, thread/start, history fixture injection and thread/resume after process restart in **manual and auto** modes. **2 passed**; no model turn in these checks. |
