@@ -1,13 +1,13 @@
 # Compatibility and validation record
 
-Version 0.1.0; evidence collected **2026-09-09**. A checked protocol/configuration setting is not a guarantee of every tool, account or workload's behavior.
+Version 0.1.1; evidence collected **2026-09-09**. A checked protocol/configuration setting is not a guarantee of every tool, account or workload's behavior.
 
 | Component | Supported / checked baseline | Evidence and limits |
 | --- | --- | --- |
-| Python | `>=3.11,<3.15` | Default suite: **72 passed, 3 opt-in skips on each** of 3.11.16, 3.12.14, **3.13.15** and 3.14.7, Linux x86-64. The hosted GitHub Actions matrix also passed all four minor versions, including lint, typing, tests, build, lock-export verification and wheel installation. |
+| Python | `>=3.11,<3.15` | Default suite: **110 passed, 3 opt-in skips on each** of 3.11.16, 3.12.14, **3.13.15** and 3.14.7, Linux x86-64. GitHub Actions runs the same four-minor-version matrix, including lint, typing, tests, build, lock-export verification and wheel installation. |
 | discord.py | 2.7.1 in `uv.lock` / runtime export | Adapter/unit tests; real Gateway, token, live button interaction and phone conversation were not exercised in the implementation environment. Package metadata permits compatible 2.x; reproducible installs use the lock. |
 | Codex CLI | **0.153.4 only** | Inspected installed executable/help and generated experimental JSON schemas. Exact version is checked before work; newer/older versions fail explicitly. No automatic CLI upgrade. |
-| Codex protocol | v2 methods in that CLI | Actual unauthenticated temporary-process checks passed: initialize, initialized, config/read, thread/start, history fixture injection and thread/resume after process restart in **manual and auto** modes. **2 passed**; no model turn in these checks. |
+| Codex protocol | v2 methods in that CLI | Baseline checks from 0.1.0: actual unauthenticated temporary-process checks passed for initialize, initialized, config/read, thread/start, history fixture injection and thread/resume after process restart in **manual and auto** modes. **2 passed**; no model turn in these checks. 0.1.1 changes bridge-owned deadlines, retaining the same protocol adapter. |
 | Approval routing | `user` / `auto_review`, `on-request` | Process config and effective thread response verified for both modes. No real model/tool escalation review or account eligibility test was performed. Runtime rejection/unavailability remain possible. |
 | Sandbox | `workspace-write` thread mode; `workspaceWrite` structured policy | Schema tests reject incorrect variants; effective real thread response checked. Managed policy is retained. |
 | Linux x86-64 | Development host | Unit/integration, strict typing, lint, wheel/sdist build, clean wheel installation and CLI smoke checks. |
@@ -15,6 +15,8 @@ Version 0.1.0; evidence collected **2026-09-09**. A checked protocol/configurati
 | systemd | User unit with standard directives | Generated units verified with systemd-analyze 261, including unusual path characters. No user bus was available for service launch, logout, linger or reboot tests; syntax verification used the offline fallback. CI verifies generated units on Ubuntu. |
 
 See [CONTRIBUTING.md](../CONTRIBUTING.md) for exact test commands and [the walkthrough](walkthrough.md) for opt-in live acceptance. Automated Codex tests use a private temporary Codex home and no production authentication; the separate model test requires explicit flags and a disposable repo. CI does not install Codex or use credentials.
+
+The 0.1.1 deadline regression test advances the asyncio scheduler clock beyond one hour and confirms an unlimited task still completes normally. Other tests check explicit caps, approval wait, interruption, request isolation and retained initialization limits. This is deterministic local test evidence, not an hour-long live Discord/model uptime test. No personal TARS service was changed to validate it.
 
 ## Protocol evidence
 

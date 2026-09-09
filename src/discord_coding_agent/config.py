@@ -71,7 +71,7 @@ class Timeouts:
     initialization: float = 120
     request: float = 45
     transport: float = 20
-    task: float = 3600
+    task: float = 0  # Zero disables only the full-task deadline.
     user_wait: float = 900
     delivery: float = 30
     shutdown: float = 10
@@ -82,9 +82,13 @@ class Timeouts:
                 isinstance(value, bool)
                 or not isinstance(value, (int, float))
                 or not math.isfinite(value)
-                or value <= 0
+                or value < 0
+                or (value == 0 and name != "task")
             ):
-                raise BridgeError(f"timeouts.{name} must be a positive finite number of seconds.")
+                requirement = "nonnegative" if name == "task" else "positive"
+                raise BridgeError(
+                    f"timeouts.{name} must be a {requirement} finite number of seconds."
+                )
 
 
 @dataclass(frozen=True)

@@ -2,13 +2,15 @@
 
 ## Discord commands
 
-Only the configured owner in the configured server/text channel can invoke these commands or decide controls. Bot messages and other channels/DMs are ignored. Prefix commands are interpreted by the bridge and never sent to Codex. Commands are case-insensitive; mode names are lowercase.
+Only the configured owner in the configured server/text channel can invoke these commands or decide controls. Bot messages and other channels/DMs are ignored. Prefix commands are interpreted by the bridge; `!run` submits only its trailing task text to Codex. Commands and duration suffixes are case-insensitive; mode names are lowercase.
 
 | Command | Effect |
 | --- | --- |
 | `!help` | Show commands and scope/limits. |
 | `!ping` | Receive/send connectivity check, no Codex or model call. |
 | `!status` | Task phase, Gateway state, thread, selected mode, last verification, elapsed time, last observed event and age, pending IDs, interruption and delivery status. |
+| `!run 30m task text` | Submit a task with a bridge-enforced deadline. Use a positive number followed by `s`, `m` or `h` (e.g. `90s`, `30m`, `1.5h`). Overrides the configured default for this task only. |
+| `!run unlimited task text` | Submit a task with no full-task deadline, overriding the configured default for this task only. |
 | `!new` | Discard the active bridge thread selection and start fresh on the next ordinary message, keeping the selected mode. Old Codex history is not deleted. Idle only. |
 | `!new auto` | Fresh conversation with Codex automatic review, verified before submission. Idle only. |
 | `!new manual` | Fresh conversation with human review of eligible requests. Idle only. |
@@ -25,6 +27,10 @@ Only the configured owner in the configured server/text channel can invoke these
 Ordinary messages submitted after completion resume the saved conversation. Requests arriving while busy are **not submitted**, not queued. The last 512 accepted/handled owner message IDs are deduplicated and persisted, including across process restart. Old deliveries outside that window are not guaranteed deduplicated. Attachments/stickers reject the entire incoming message; paths must be sent as ordinary text. Images, audio and uploaded files are not read.
 
 Asking Codex in ordinary prose to start a new chat does not switch the bridge session. Only `!new` does. The bridge cannot recognize every natural-language request for a new conversation and does not pretend the coding model changed its own routing.
+
+`!run` uses the same conversation, authorization, deduplication and atomic reservation as ordinary text. It cannot modify the deadline of an active task: busy requests are rejected without submission. The next ordinary message uses the configured default again. `!status` and the acceptance message show the effective deadline (or `none (unlimited)`). The full-task timer includes preparation and human wait; expiry requests interruption and then bounded process cleanup, which can take additional shutdown time. Cancellation never undoes effects.
+
+Natural-language constraints such as “only work for 30 minutes” reach Codex unchanged; the bridge does not parse or guarantee enforcement of arbitrary prose. Use `!run 30m …` for a hard timer, and include any other stopping conditions in the task text. A completed turn ends the task even with no deadline. The bridge does not repeatedly prompt the model to manufacture more work. Requests requiring oversight still wait for your decision under the separate `user_wait` policy.
 
 ## Local CLI — on the Pi
 
@@ -60,16 +66,18 @@ Changing `CODEX_REPO` while using existing state fails repository identity valid
 
 ## Timeout policy
 
-All values are **seconds**, finite and greater than zero. The defaults below match `Timeouts` in source:
+All values are finite **seconds**. `task = 0` disables the full-task deadline; all other fields must be greater than zero. The defaults below match `Timeouts` in source:
 
 | `[timeouts]` key | Default | Operation and outcome |
 | --- | ---: | --- |
 | `initialization` | 120 | Overall version/process/handshake/config/thread preparation. Failure interrupts reservation; no prompt replay. |
 | `request` | 45 | One RPC response, including `turn/start` acknowledgement. A lost acknowledgement is uncertain work. Never resend automatically. |
 | `transport` | 20 | Incomplete JSON frame after the first byte, or pipe write drain. There is **no idle stdout-read timer**. |
-| `task` | 3600 | Complete task budget including initialization and human input wait; starts when the task runner begins. |
+| `task` | 0 | No full-task deadline. A positive value sets the default complete task budget, including initialization and human input wait, starting when the task runner begins. `!run` overrides it for one task. |
 | `user_wait` | 900 | Individual pending approval/question. Expiry sends an RPC error without approval and invalidates controls; Codex may continue/finish. |
 | `delivery` | 30 | Individual Discord send/history/disable operation. Transient sends use at most three attempts with 1s/2s backoff and history reconciliation. |
 | `shutdown` | 10 | Each interruption acknowledgement/wait/process-termination stage; service stop timeout is derived from these stages. |
 
-A 45-second RPC timeout is not a one-hour task deadline. Errors name the operation, measured elapsed time, configured limit and diagnostic next step. Human wait counts against both its own timeout and the overall deadline. Configure a longer `task` if you need longer work; quiet logs alone never trigger cancellation. HTTP typing attempts have a cosmetic limit of at most 5 seconds and cannot cancel a task.
+A 45-second RPC timeout is separate from the optional full-task deadline. Errors name the operation, measured elapsed time, configured limit and diagnostic next step. Human wait counts against its own timeout and any enabled overall deadline. Disabling the task deadline does not disable approval checks, RPC/connection timeouts, `!stop`, Codex completion/failure, or account usage limits. Quiet logs alone never trigger cancellation. HTTP typing attempts have a cosmetic limit of at most 5 seconds and cannot cancel a task.
+
+An explicit positive value in an existing config is preserved on upgrade. To lift a previous one-hour default, edit the existing `[timeouts]` table in your private config to `task = 0` and restart while idle. If no `[timeouts]` table exists, the new no-deadline default already applies after updating/restarting the installed package. See [the update guide](service.md#update-without-losing-credentials-or-conversation).
