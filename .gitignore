@@ -216,3 +216,21 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Bridge runtime/private data (never publish)
+config.toml
+.env
+.env.*
+!.env.example
+state.json
+process.lock
+*.backup-*
+*.log
+logs/
+transcripts/
+auth.json
+credentials.json
+.runtime/
+.venv*/
+.agents/
+.codex/

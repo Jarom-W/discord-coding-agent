@@ -1,0 +1,41 @@
+[build-system]
+requires = ["hatchling==1.27.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "discord-coding-agent"
+version = "0.1.0"
+description = "An owner-only Discord Gateway bridge to a local Codex app-server"
+readme = "README.md"
+requires-python = ">=3.11,<3.15"
+license = "MIT"
+authors = [{name = "discord-coding-agent contributors"}]
+dependencies = ["discord.py>=2.6,<3"]
+classifiers = ["Operating System :: POSIX :: Linux", "Programming Language :: Python :: 3.13"]
+
+[project.scripts]
+discord-coding-agent = "discord_coding_agent.cli:main"
+
+[dependency-groups]
+dev = ["pytest>=8,<10", "pytest-asyncio>=1,<2", "ruff>=0.12,<1", "mypy>=1.16,<2", "build>=1.2,<2", "jsonschema>=4.24,<5", "types-jsonschema>=4.24,<5"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+markers = ["codex: opt-in real Codex non-model protocol checks", "live: opt-in model tests in a disposable repository"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC"]
+ignore = ["E501"] # Formatter wraps code; user-facing help/error prose may remain long.
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+files = ["src"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/discord_coding_agent"]

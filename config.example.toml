@@ -1,0 +1,19 @@
+# EXAMPLE ONLY. Real config belongs outside both repositories; chmod 600.
+DISCORD_TOKEN = "REPLACE_LOCALLY_WITH_BOT_TOKEN"
+DISCORD_OWNER_ID = "123456789012345678"
+DISCORD_GUILD_ID = "234567890123456789"
+DISCORD_CHANNEL_ID = "345678901234567890"
+CODEX_REPO = "/absolute/path/to/your/target-repository"
+CODEX_EXECUTABLE = "codex" # Or absolute executable, including npm/nvm bin/codex
+DISPLAY_NAME = "TARS"
+APPROVAL_MODE = "manual" # Initial mode; saved state takes precedence thereafter
+# STATE_DIR = "/absolute/path/outside/repositories/bridge-state"
+
+[timeouts]
+initialization = 120 # Total preparation: version, process, handshake, config, thread
+request = 45         # One RPC response, not a full coding task
+transport = 20       # Partial protocol frame / pipe drain; no timeout for idle stdout
+task = 3600         # Whole task, INCLUDING initialization and human wait
+user_wait = 900      # Each pending approval or question; expires without granting approval
+delivery = 30       # Each Discord HTTP/history attempt
+shutdown = 10        # Interrupt response/wait and process termination stages

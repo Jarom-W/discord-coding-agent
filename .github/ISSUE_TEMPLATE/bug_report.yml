@@ -1,0 +1,26 @@
+name: Sanitized bug report
+description: Report a reproducible bridge problem without credentials or private content.
+title: "Bug: "
+body:
+  - type: markdown
+    attributes:
+      value: "Never include tokens, auth caches, raw protocol logs, complete state, private prompts or repository contents. Use SECURITY.md for vulnerabilities."
+  - type: textarea
+    id: versions
+    attributes:
+      label: Versions and platform
+      description: Bridge, Codex CLI, Python, discord.py, OS, architecture; physical Pi or other host?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps, expected result and actual result
+      description: Prefer a disposable repository. Which command/mode and task phase?
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Sanitized diagnostics
+      description: Operation, timeout type/seconds, approximate UTC timestamp and correlation IDs. Redact personal paths/IDs. Do not attach state/config/auth files.
