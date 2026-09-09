@@ -53,10 +53,27 @@ def test_invalid_configuration(tmp_path, monkeypatch, field, value):
         Config.load(path)
 
 
-@pytest.mark.parametrize("value", [0, -1, float("nan"), float("inf"), True])
+@pytest.mark.parametrize("value", [-1, float("nan"), float("inf"), True, "unlimited", None])
 def test_timeout_validation(value):
     with pytest.raises(BridgeError):
         Timeouts(task=value)
+
+
+@pytest.mark.parametrize(
+    "field", ["initialization", "request", "transport", "user_wait", "delivery", "shutdown"]
+)
+def test_only_task_deadline_can_be_disabled(field):
+    with pytest.raises(BridgeError, match=field):
+        Timeouts(**{field: 0})
+
+
+def test_unlimited_default_and_explicit_config_limits(tmp_path):
+    path, _ = write_config(tmp_path)
+    assert Config.load(path).timeouts.task == 0
+    original = path.read_text()
+    for limit in [0, 3600, 7200]:
+        atomic_write(path, original + f"\n[timeouts]\ntask = {limit}\n")
+        assert Config.load(path).timeouts.task == limit
 
 
 def test_service_idempotent_install_preserves_unmanaged(config, monkeypatch, tmp_path):

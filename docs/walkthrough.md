@@ -76,6 +76,8 @@ Ask Codex to run `sleep 60` in the demo repository and report when it finishes. 
 
 The bridge first asks Codex to interrupt; if needed it terminates its owned process group within bounded shutdown stages. Completed edits or external effects remain. Inspect the repository before an explicit continuation. The previous request is never automatically resubmitted.
 
+While idle, send `!run 10s In this disposable repository, run sleep 60 without editing files.` If Codex is still working after ten seconds, expect a full-task deadline error naming the 10-second limit and interruption cleanup. Initialization and human wait count toward this cap, so the command may not start before expiry. If Codex completes or fails sooner, record that outcome instead. Then send `!run unlimited Read-only: inspect git status and report.` The acceptance message and active `!status` should report no task limit; `!stop` and approvals remain effective. Subsequent ordinary text uses the configured default again. Do not interpret a short smoke test as proof of hour-long live uptime.
+
 ## 7. Service restart and saved conversation
 
 Complete the [service setup](service.md). **In Discord:** start a new conversation and ask it to remember `lighthouse`. Wait for completion and note the thread ID. **On the Pi:**

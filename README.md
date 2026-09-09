@@ -43,6 +43,10 @@ After foreground checks, follow [systemd installation](docs/service.md) to run w
 
 `!help` lists all commands. `!status` shows operational state and last observed activity. `!stop` interrupts work, with bounded child-process escalation; it does not undo completed effects. `!last` retrieves the last completed result saved before delivery. Busy messages are explicitly rejected as **not submitted**, and duplicate message IDs are ignored.
 
+Tasks have **no bridge time limit by default**. For an enforced cap, send `!run 30m Inspect and fix the failing tests`; seconds, minutes and hours are supported. `!run unlimited …` removes the task deadline for that request. Both continue the selected conversation. Natural-language rules are passed to Codex unchanged; use `!run` when a timer must be enforced by the bridge. Work ends when Codex completes, fails, is interrupted, or reaches an explicit deadline; approval requirements and other timeouts still apply. This does not extend account usage limits or automatically start another turn.
+
+**Upgrading from 0.1.0:** an existing `[timeouts] task = 3600` remains a one-hour limit. After [updating the installed package](docs/service.md#update-without-losing-credentials-or-conversation), set `task = 0` in your private config and restart while idle to remove that default. No personal installation/configuration is changed automatically.
+
 Manual mode displays green **Approve** and red **Deny** buttons for requests that need you, with complete details/diffs when supplied. `!approve ID` and `!deny ID` use the same decision path. `!answer ID …` answers questions. Manual mode does **not** prompt for every sandbox-allowed edit.
 
 `!new auto` selects Codex's automatic approval reviewer with `on-request` and `workspace-write`. Eligible requests may be approved **or rejected**. Effective process and thread settings are checked before submission; this does not prove every tool's runtime behavior. Unsupported settings fail clearly. `!new manual` is an explicit alternative. Session/mode switching is rejected while busy. Asking the model in prose to “open a new chat” never changes the bridge's active thread.

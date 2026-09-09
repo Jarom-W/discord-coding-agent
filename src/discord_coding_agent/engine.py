@@ -3,6 +3,8 @@
 import asyncio
 import json
 import logging
+import math
+import re
 import time
 import uuid
 from collections.abc import Callable
@@ -21,6 +23,7 @@ HELP = """Ordinary text starts/continues the saved Codex conversation. One activ
 !help — commands and limitations
 !ping — Discord connection test; no model
 !status — operational state, thread, mode, elapsed, last observed activity, pending requests
+!run 30m task text — submit one task with a time limit (s/m/h, e.g. 90s or 1.5h); !run unlimited task text removes the task limit for that task
 !new [auto|manual] — fresh conversation; current mode if omitted; idle only
 !approvals — selected mode and verification scope
 !approve ID / !deny ID — decide a pending approval (same path as buttons)
@@ -28,7 +31,26 @@ HELP = """Ordinary text starts/continues the saved Codex conversation. One activ
 !stop — interrupt, then stop the owned child if necessary; does not undo edits/external effects
 !last — retrieve the last saved result
 Only !new switches the bridge conversation. Asking Codex to “open a new chat” in prose does not switch it.
+Ordinary text uses the configured task limit (default: none). !run overrides it for one task, including initialization and human wait; it cannot change active work. Natural-language time rules are passed to Codex; use !run for an enforced timer. Approval and connection timeouts still apply.
 Text and repository paths only; attachments are rejected. Internet and valid Codex authentication required. Manual mode reviews sandbox escalations, not every edit. The service waits for your messages; no autonomous schedule."""
+
+
+def parse_task_limit(value: str) -> float:
+    """Parse an explicit bridge timer; never guess time limits from prompt prose."""
+    if value.lower() == "unlimited":
+        return 0
+    match = re.fullmatch(r"([0-9]+(?:\.[0-9]+)?)([smh])", value.lower())
+    if match:
+        seconds = float(match[1]) * {"s": 1, "m": 60, "h": 3600}[match[2]]
+        if math.isfinite(seconds) and seconds > 0:
+            return seconds
+    raise BridgeError(
+        "Use !run DURATION task text: a positive duration such as 90s, 30m or 1.5h, or unlimited. Nothing was submitted."
+    )
+
+
+def describe_task_limit(limit: float) -> str:
+    return f"{limit:g}s including initialization and human wait" if limit else "none (unlimited)"
 
 
 @dataclass(frozen=True)
@@ -82,6 +104,7 @@ class Engine:
         self.task_id = ""
         self.started: float | None = None
         self.elapsed: float | None = None
+        self.task_limit = config.timeouts.task
         self.last_event = "none"
         self.last_event_at: float | None = None
         self.pending: dict[str, Pending] = {}
@@ -141,6 +164,10 @@ class Engine:
             except BridgeError as exc:
                 self.sink.text(str(exc))
             return
+        self.submit(origin, content, self.config.timeouts.task)
+
+    def submit(self, origin: Origin, content: str, task_limit: float) -> None:
+        """Reserve a task atomically after message authorization and deduplication."""
         if self.connection_only:
             self.sink.text(
                 "Connection-only mode: no Codex process or model invoked. Restart without --connection-only."
@@ -155,19 +182,22 @@ class Engine:
         self.task_id = uuid.uuid4().hex
         self.started = time.monotonic()
         self.elapsed = None
+        self.task_limit = task_limit
         self.verified = False
         self.state.active = {
             "task_id": self.task_id,
             "message_id": origin.message,
             "started_at": time.time(),
             "turn_id": None,
+            "task_limit_seconds": task_limit,
         }
         self.state.interrupted = False
         self.save()
         self.transition("initializing")
+        log.info("task=%s task_limit_seconds=%g (0=unlimited)", self.task_id, task_limit)
         self.worker = asyncio.create_task(self._run(content), name=f"coding-{self.task_id}")
         self.sink.text(
-            f"Accepted task {self.task_id[:12]}. Use !status for last observed activity; !stop to interrupt."
+            f"Accepted task {self.task_id[:12]}. Task limit: {describe_task_limit(task_limit)}. Use !status for last observed activity; !stop to interrupt."
         )
 
     async def command(self, origin: Origin, content: str) -> None:
@@ -183,6 +213,12 @@ class Engine:
             )
         elif cmd == "!status":
             self.sink.text(self.status())
+        elif cmd == "!run":
+            if len(parts) != 3:
+                raise BridgeError(
+                    "Use !run DURATION task text; e.g. !run 30m inspect and fix tests."
+                )
+            self.submit(origin, parts[2], parse_task_limit(parts[1]))
         elif cmd == "!approvals":
             self.sink.text(self.approvals())
         elif cmd == "!last":
@@ -259,7 +295,7 @@ class Engine:
             f"Elapsed: {elapsed}; last observed activity: {self.last_event} ({age})\n"
             f"Pending: {', '.join(self.pending) or 'none'}; interrupted: {self.state.interrupted}; last result delivered: {self.state.delivered}\n"
             f"{getattr(self.sink, 'status', '')}\n"
-            f"Task limit: {self.config.timeouts.task:g}s including initialization and human wait. Quiet logs/typing are not proof a task is stuck."
+            f"{'Active' if self.busy else 'Default'} task limit: {describe_task_limit(self.task_limit if self.busy else self.config.timeouts.task)}. Quiet logs/typing are not proof a task is stuck."
         )
 
     async def _prepare(self) -> None:
@@ -294,7 +330,7 @@ class Engine:
         task_started = time.monotonic()
         try:
             try:
-                async with asyncio.timeout(self.config.timeouts.task):
+                async with asyncio.timeout(self.task_limit or None) as task_deadline:
                     init_started = time.monotonic()
                     try:
                         async with asyncio.timeout(self.config.timeouts.initialization):
@@ -340,10 +376,12 @@ class Engine:
                     self.sink.text(result, result_id=self.task_id)
                     self.transition("idle")
             except TimeoutError as exc:
+                if not task_deadline.expired():
+                    raise
                 raise LimitError(
                     "full task deadline (including human wait)",
                     time.monotonic() - task_started,
-                    self.config.timeouts.task,
+                    self.task_limit,
                 ) from exc
         except asyncio.CancelledError:
             self.state.interrupted = True

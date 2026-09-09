@@ -85,6 +85,12 @@ systemctl --user start discord-coding-agent.service
 
 The installed package is a non-editable copy: updating Git alone does not update running code. Run the pip reinstall. Do not rerun setup unless changing config. This procedure leaves config/state/auth untouched; it does not upgrade Codex. Review its compatibility separately.
 
+### Removing the old one-hour limit (0.1.1)
+
+The new default has no full-task deadline. If private configuration explicitly contains `task = 3600` under `[timeouts]`, that setting is preserved. After the backup above, edit that value to `task = 0`, then restart **your bridge instance** while idle. Do not add a second `[timeouts]` table. Other timeout values remain positive and unchanged. If the `task` key is absent, the new default applies after reinstall/restart without a config edit. In Discord, `!status` should show `Default task limit: none (unlimited)` when idle. `!run 30m task text` sets a deadline for one task; `!run unlimited task text` removes it for one task even with a positive configured default.
+
+State schema remains 1; credentials, thread selection and approval mode are preserved. Before rolling back to 0.1.0, remove `task = 0` or restore a positive value: 0.1.0 requires all timeouts to be positive and otherwise refuses startup. Never restore active work to replay it.
+
 ## Rollback
 
 Stop the bridge. Find your actual backup directory; below it is stored in `dca_backup`. Return to the recorded commit without discarding uncommitted work, then reinstall that release:
