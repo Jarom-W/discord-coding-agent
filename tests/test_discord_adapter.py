@@ -1,5 +1,6 @@
+import json
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import discord
 
@@ -58,4 +59,51 @@ async def test_disconnect_does_not_stop_codex(config, tmp_path):
     await client.on_disconnect()
     client.engine.stop.assert_not_awaited()
     assert not client.engine.connected
+    await client.close()
+
+
+async def test_ready_record_tracks_validated_gateway_and_disconnect(config, tmp_path, monkeypatch):
+    monkeypatch.setenv("INVOCATION_ID", "test-invocation")
+    client = BridgeClient(config, StateStore(tmp_path / "adapter-state", "identity", "manual"))
+    guild = SimpleNamespace(id=22, me=object())
+    channel = MagicMock(spec=discord.TextChannel)
+    channel.guild = guild
+    channel.type = discord.ChannelType.text
+    channel.permissions_for.return_value = discord.Permissions(
+        view_channel=True, send_messages=True, read_message_history=True, attach_files=True
+    )
+    client.get_guild = lambda _: guild
+    client.get_channel = lambda _: channel
+    path = client.store.directory / "ready.json"
+    channel.type = discord.ChannelType.news
+    await client.on_ready()
+    assert json.loads(path.read_text())["ready"] is False
+    channel.type = discord.ChannelType.text
+    await client.on_ready()
+    assert json.loads(path.read_text())["ready"] is True
+    assert json.loads(path.read_text())["invocation"] == "test-invocation"
+    await client.on_disconnect()
+    assert json.loads(path.read_text())["ready"] is False
+    await client.close()
+
+
+async def test_missing_channel_permissions_prevent_submission(config, tmp_path):
+    client = BridgeClient(config, StateStore(tmp_path / "adapter-state", "identity", "manual"))
+    client.workspaces.message = AsyncMock()
+    guild = SimpleNamespace(id=22, me=object())
+    channel = MagicMock(spec=discord.TextChannel)
+    channel.guild, channel.id, channel.type = guild, 44, discord.ChannelType.text
+    channel.permissions_for.return_value = discord.Permissions(
+        view_channel=True, send_messages=True, read_message_history=True
+    )
+    message = SimpleNamespace(
+        author=SimpleNamespace(bot=False, id=11),
+        guild=guild,
+        channel=channel,
+        id=999,
+        content="edit files",
+    )
+    await client.on_message(message)
+    client.workspaces.message.assert_not_awaited()
+    assert client.delivery.queue.qsize() == 1
     await client.close()

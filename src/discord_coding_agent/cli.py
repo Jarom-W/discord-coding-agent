@@ -10,11 +10,12 @@ import os
 import platform
 import signal
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 import discord
 
-from . import __version__, protocol, service
+from . import __version__, deployment, protocol, service
 from .config import Config, config_path, discover_codex, repository_identity
 from .discord_client import BridgeClient
 from .errors import BridgeError, log_error
@@ -34,9 +35,9 @@ def setup(path: Path) -> None:
         ).strip(),
         "DISCORD_OWNER_ID": input("Owner numeric user ID: ").strip(),
         "DISCORD_GUILD_ID": input("Server numeric ID: ").strip(),
-        "DISCORD_CHANNEL_ID": input("Private text channel numeric ID: ").strip(),
+        "DISCORD_CHANNEL_ID": input("Initial private text channel numeric ID: ").strip(),
         "CODEX_REPO": str(
-            Path(input("Absolute target Git repository path (separate from bridge): ").strip())
+            Path(input("Initial Git repository absolute path (separate from bridge): ").strip())
             .expanduser()
             .resolve()
         ),
@@ -64,6 +65,10 @@ async def doctor(config: Config, probe: bool, discord_check: bool) -> bool:
         f"Bridge {__version__}; Python {platform.python_version()}; {platform.system()} {platform.machine()}; discord.py {importlib.metadata.version('discord.py')}"
     )
     print(f"Config: {config.path}\nRepository: {config.repo}\nState: {config.state_dir}")
+    print("Workspace roots: " + ", ".join(str(root) for root in config.roots))
+    print(
+        f"Workspace catalog: {config.state_dir / 'workspaces.json'}; updater settings present: {deployment.settings_path(config).exists()}"
+    )
     print(
         f"Configured mode: {config.mode}; Codex baseline: {protocol.BASELINE}; token: present (hidden)"
     )
@@ -197,7 +202,84 @@ def parser() -> argparse.ArgumentParser:
         ],
     )
     manager.add_argument("--unit-name", default=service.DEFAULT_UNIT)
+    deploy = sub.add_parser("deploy", help="Opt-in pull deployment of CI-verified main commits")
+    deploy.add_argument(
+        "action",
+        choices=["install", "enable", "disable", "check", "status", "rollback", "uninstall"],
+    )
+    deploy.add_argument(
+        "--repository",
+        help="Public GitHub OWNER/REPO trusted for updates; required on first install",
+    )
+    deploy.add_argument(
+        "--directory", type=Path, help="Separate directory for prepared releases and backups"
+    )
+    deploy.add_argument(
+        "--unit-name",
+        help="Existing managed bot service (install only)",
+    )
+    deploy.add_argument(
+        "--retry", action="store_true", help="Retry the currently failed revision (check only)"
+    )
     return root
+
+
+def deploy_command(config: Config, args: argparse.Namespace) -> None:
+    if args.retry and args.action != "check":
+        raise BridgeError("--retry is only supported with deploy check.")
+    if args.action != "install" and (args.repository or args.directory or args.unit_name):
+        raise BridgeError(
+            "Repository/directory/unit options are only supported with deploy install."
+        )
+    if args.action == "install":
+        existing = deployment.settings_path(config).exists()
+        if existing:
+            settings = deployment.Settings.load(config)
+            settings = replace(
+                settings,
+                repository=args.repository or settings.repository,
+                directory=args.directory.expanduser().absolute()
+                if args.directory
+                else settings.directory,
+                unit=args.unit_name or settings.unit,
+            )
+        else:
+            if not args.repository:
+                raise BridgeError(
+                    "Use deploy install --repository OWNER/REPO; public GitHub repositories only."
+                )
+            directory = args.directory or (
+                Path(os.environ.get("XDG_DATA_HOME", str(Path.home() / ".local/share")))
+                / "discord-coding-agent"
+                / (args.unit_name or service.DEFAULT_UNIT).removesuffix(".service")
+            )
+            settings = deployment.Settings(
+                args.repository,
+                directory.expanduser().absolute(),
+                args.unit_name or service.DEFAULT_UNIT,
+            )
+        deployment.install(config, settings)
+        print(
+            f"Updater installed for {settings.repository}; timer is not enabled/started automatically. Run deploy check, then deploy enable. Settings: {deployment.settings_path(config)}"
+        )
+        return
+    settings = deployment.Settings.load(config)
+    if args.action in {"enable", "disable", "uninstall"}:
+        deployment.manage(args.action, settings)
+        print(
+            f"Updater {args.action} complete. Bot config, sessions, repositories, releases and Codex authentication retained."
+        )
+    else:
+        updater = deployment.Updater(config, settings)
+        if args.action == "status":
+            print(
+                f"Repository: {settings.repository}; branch: main; CI: ci.yml push runs\nReleases/backups: {settings.directory}\nTimer: {deployment.unit_names(settings)[1]}; interval {settings.interval:g}s plus jitter"
+            )
+            print(
+                f"Current: {updater.data['current']}; previous: {updater.data['previous']}; failed: {updater.data['failed']}; interrupted deployment: {bool(updater.data['transaction'])}"
+            )
+        else:
+            print(updater.check(retry=args.retry, rollback=args.action == "rollback"))
 
 
 def main() -> None:
@@ -228,6 +310,8 @@ def main() -> None:
                 asyncio.run(run(config, args.connection_only))
             elif args.command == "doctor":
                 asyncio.run(doctor(config, args.probe, args.discord))
+            elif args.command == "deploy":
+                deploy_command(config, args)
             elif args.command == "service":
                 if args.action == "render":
                     print(service.render(config))

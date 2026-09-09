@@ -21,6 +21,8 @@ uv build
 
 Tests cover authorization, deduplication/exclusivity, mode/session persistence, simultaneous decisions, stale controls, questions, reviewer verification, realistic enum validation, RPC correlation/disconnects, output bounds, cancellation/deadlines, state damage, service escaping and cosmetic HTTP isolation. See [compatibility](docs/compatibility.md) for actual validation scope. Default tests use synthetic transports; they are not live Discord compatibility evidence.
 
+Workspace tests use temporary Git repositories and exercise named sessions, legacy-state retention, channel isolation, symlink roots, shared task/maintenance leases, failed catalog writes and restart continuity. Deployment tests cover exact main/push/workflow/repository CI gating, newer failed reruns, preparation failure, idle deferral, readiness identity, failed startup, crash recovery, rollback, retention and unit syntax. They stub GitHub/service lifecycle operations and never adopt a production bot. A separate read-only public GitHub API probe is documented in the compatibility record; it is not a live deployment test.
+
 ## Codex protocol checks — explicit opt-in
 
 When the exact installed CLI is available:

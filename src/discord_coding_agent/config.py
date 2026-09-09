@@ -1,5 +1,6 @@
 """Validated per-user TOML configuration; environment overrides retain familiar names."""
 
+import json
 import math
 import os
 import shutil
@@ -104,6 +105,11 @@ class Config:
     state_dir: Path = field(default_factory=state_path)
     timeouts: Timeouts = field(default_factory=Timeouts)
     path: Path = field(default_factory=config_path)
+    workspace_roots: tuple[Path, ...] = ()
+
+    @property
+    def roots(self) -> tuple[Path, ...]:
+        return self.workspace_roots or (self.repo.parent,)
 
     @classmethod
     def load(cls, path: Path | None = None) -> "Config":
@@ -128,6 +134,7 @@ class Config:
             "APPROVAL_MODE",
             "STATE_DIR",
             "timeouts",
+            "WORKSPACE_ROOTS",
         }
         if set(data) - allowed:
             raise BridgeError("Unknown configuration keys; compare config.example.toml.")
@@ -136,6 +143,14 @@ class Config:
             return os.environ.get(key, data.get(key, default))
 
         try:
+            roots = get("WORKSPACE_ROOTS", [])
+            if isinstance(roots, str):
+                roots = json.loads(roots)
+            if not isinstance(roots, list) or any(
+                not isinstance(root, str) or not Path(root).expanduser().is_absolute()
+                for root in roots
+            ):
+                raise ValueError("WORKSPACE_ROOTS must be an array of absolute directory paths")
             config = cls(
                 token=str(get("DISCORD_TOKEN", "")),
                 owner_id=int(get("DISCORD_OWNER_ID", 0)),
@@ -148,6 +163,7 @@ class Config:
                 state_dir=Path(get("STATE_DIR", str(state_path()))).expanduser().resolve(),
                 timeouts=Timeouts(**data.get("timeouts", {})),
                 path=path,
+                workspace_roots=tuple(Path(root).expanduser().resolve() for root in roots),
             )
         except (TypeError, ValueError) as exc:
             raise BridgeError(
@@ -167,4 +183,8 @@ class Config:
         outside(config.state_dir, config.repo, "State directory")
         outside(Path(__file__), config.repo, "Bridge installation")
         repository_identity(config.repo)
+        if any(not root.is_dir() for root in config.roots):
+            raise BridgeError("WORKSPACE_ROOTS must contain existing directories.")
+        if not any(config.repo.is_relative_to(root) for root in config.roots):
+            raise BridgeError("WORKSPACE_ROOTS must include the initial CODEX_REPO.")
         return config

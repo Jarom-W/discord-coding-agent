@@ -1,5 +1,13 @@
 # Release notes
 
+## 0.2.0 — 2026-09-09
+
+Added channel workspaces and persistent named conversations: `!dirs`, `!repo [--fresh] PATH`, `!sessions`, `!session NAME`, `!name NAME`, and `!new [auto|manual] [NAME]`. One owner can bind additional private text channels in the configured server using the same bot. Each channel retains its selected repository/session across restarts, with session-labelled replies and per-session results/modes. `WORKSPACE_ROOTS` bounds directory selection; existing Git worktrees are required. Eight channels and 64 sessions are supported, with one coding task across the bot. Cross-channel `!stop` remains available; approvals remain scoped to their own channel/session/turn.
+
+Added opt-in pull deployment through `deploy install/enable/disable/check/status/rollback/uninstall`. The Pi checks public GitHub CI for the exact main push commit, prepares a separate release/venv, waits for the shared activity lock, backs up state/config/unit and switches only its managed bot. Startup checks match Gateway readiness to the service PID/invocation; failures restore the previous unit and block repeated attempts at the failed revision. Interrupted switches have durable recovery metadata. Retention protects current/previous releases and registered coding repositories. No inbound endpoint, Actions runner on the Pi, credentials in CI, or automatic Codex CLI upgrade is used.
+
+Original session state schema stays 1. A separate `workspaces.json` catalog indexes the original initial-channel state as `main`; other session states are stored under opaque IDs. Existing config/token/auth and the initial thread remain intact. Updater protocol 1 requires a manual bootstrap update to this release before auto-deployment can be enabled. See [workspace setup/recovery](docs/workspaces.md), [deployment setup/rollback](docs/deployment.md), and [validation scope](docs/compatibility.md). No personal TARS service was modified during implementation.
+
 ## 0.1.1 — 2026-09-09
 
 Removed the default one-hour full-task deadline. `timeouts.task = 0` now means no full-task timer; explicit positive existing settings remain effective. Added `!run 30m task text` (positive `s`/`m`/`h` durations) and `!run unlimited task text` to override the default for one task in the selected conversation. Active task limits cannot be changed by another message. Acceptance, status and interrupted-task metadata report the chosen limit.
