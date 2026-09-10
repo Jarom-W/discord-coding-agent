@@ -1,6 +1,7 @@
 """Bounded delivery with retries and history reconciliation, never coding-task retries."""
 
 import asyncio
+import codecs
 import logging
 import time
 import uuid
@@ -13,19 +14,44 @@ from .errors import BridgeError, LimitError, log_error
 
 log = logging.getLogger(__name__)
 ATTACHMENT_BYTES = 512 * 1024
+INLINE_UNITS = 1800  # Leave room for delivery markers within Discord's 2000-character limit.
+MAX_INLINE_PAGES = 8
 
 
-def payloads(text: str) -> list[tuple[str, bytes | None]]:
-    # Use attachments for long/complex replies; preserve all UTF-8, including code fences.
-    if len(text.encode("utf-16-le")) // 2 <= 1800:
+def inline_payloads(text: str) -> list[tuple[str, bytes | None]]:
+    """Page bridge-authored help at line/word boundaries, preserving Unicode verbatim."""
+    pages: list[tuple[str, bytes | None]] = []
+    while text:
+        if len(pages) == MAX_INLINE_PAGES:
+            raise BridgeError("Inline help exceeds eight pages; report this bridge help error.")
+        units = end = 0
+        for char in text:
+            width = 2 if ord(char) > 0xFFFF else 1
+            if units + width > INLINE_UNITS:
+                break
+            units += width
+            end += 1
+        if end < len(text):
+            end = text.rfind("\n", 0, end) + 1 or text.rfind(" ", 0, end) + 1 or end
+        pages.append((text[:end], None))
+        text = text[end:]
+    return pages
+
+
+def payloads(text: str, *, inline: bool = False) -> list[tuple[str, bytes | None]]:
+    if len(text.encode("utf-16-le")) // 2 <= INLINE_UNITS:
         return [(text or "(empty result)", None)]
+    if inline:
+        return inline_payloads(text)
+    # Long results/diffs retain file delivery, including code fences. Each independently
+    # readable file has a UTF-8 signature so viewers do not guess a legacy encoding.
     chunks: list[tuple[str, bytes | None]] = []
-    chunk = bytearray()
+    chunk = bytearray(codecs.BOM_UTF8)
     for char in text:
-        encoded = char.encode()
+        encoded = char.encode("utf-8")
         if len(chunk) + len(encoded) > ATTACHMENT_BYTES:
             chunks.append(("Full text attached.", bytes(chunk)))
-            chunk.clear()
+            chunk = bytearray(codecs.BOM_UTF8)
         chunk.extend(encoded)
     if chunk:
         chunks.append(("Full text attached.", bytes(chunk)))
@@ -48,6 +74,7 @@ class Job:
     result_id: str | None = None
     pending: Pending | None = None
     disable_id: int | None = None
+    inline: bool = False
 
 
 class Delivery:
@@ -87,9 +114,10 @@ class Delivery:
                 "delivery=queue_full result=%s; saved result available via !last", job.result_id
             )
 
-    def text(self, content: str, *, result_id: str | None = None) -> None:
+    def text(self, content: str, *, result_id: str | None = None, inline: bool = False) -> None:
         self.put(
-            Job(content, result_id or uuid.uuid4().hex, result_id=result_id), 1 if result_id else 3
+            Job(content, result_id or uuid.uuid4().hex, result_id=result_id, inline=inline),
+            1 if result_id else 3,
         )
 
     def request(self, pending: Pending) -> None:
@@ -145,7 +173,7 @@ class Delivery:
                 if job.disable_id:
                     await asyncio.wait_for(self.transport.disable(job.disable_id), self.timeout)
                     continue
-                parts = payloads(job.text)
+                parts = payloads(job.text, inline=job.inline)
                 for index, (text, data) in enumerate(parts):
                     marker = f"[dca:{job.key}:{index + 1}/{len(parts)}]"
                     await self.send_part(

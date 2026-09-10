@@ -41,7 +41,7 @@ After foreground checks, follow [systemd installation](docs/service.md) to run w
 
 ## Everyday use
 
-`!help` lists all commands. `!status` shows operational state and last observed activity. `!stop` interrupts work, with bounded child-process escalation; it does not undo completed effects. `!last` retrieves the last completed result saved before delivery. Busy messages are explicitly rejected as **not submitted**, and duplicate message IDs are ignored.
+`!help` lists all commands directly in chat, split into short messages you can read on mobile without downloading a file. `!status` shows operational state and last observed activity. `!stop` interrupts work, with bounded child-process escalation; it does not undo completed effects. `!last` retrieves the last completed result saved before delivery. Busy messages are explicitly rejected as **not submitted**, and duplicate message IDs are ignored.
 
 Tasks have **no bridge time limit by default**. For an enforced cap, send `!run 30m Inspect and fix the failing tests`; seconds, minutes and hours are supported. `!run unlimited …` removes the task deadline for that request. Both continue the selected conversation. Natural-language rules are passed to Codex unchanged; use `!run` when a timer must be enforced by the bridge. Work ends when Codex completes, fails, is interrupted, or reaches an explicit deadline; approval requirements and other timeouts still apply. This does not extend account usage limits or automatically start another turn.
 

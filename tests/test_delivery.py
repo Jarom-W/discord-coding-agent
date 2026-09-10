@@ -1,5 +1,10 @@
-from discord_coding_agent.delivery import Delivery, payloads
+import codecs
+
+import pytest
+
+from discord_coding_agent.delivery import INLINE_UNITS, MAX_INLINE_PAGES, Delivery, payloads
 from discord_coding_agent.engine import Pending
+from discord_coding_agent.errors import BridgeError
 
 
 class Transport:
@@ -10,6 +15,7 @@ class Transport:
         self.typing_error = False
         self.disabled = []
         self.controls = []
+        self.payloads = []
 
     async def find(self, marker):
         return self.messages.get(marker)
@@ -18,6 +24,7 @@ class Transport:
         self.sends += 1
         self.messages[marker] = self.sends
         self.controls.append(marker.endswith(":control]"))
+        self.payloads.append((text, data, marker))
         if self.ambiguous:
             raise TimeoutError()
         return self.sends
@@ -31,11 +38,60 @@ class Transport:
 
 
 def test_long_unicode_complete_attachments():
-    content = "😀```python\n" * 100000
+    content = "😀```python\n— café 中文\n" * 100000
     parts = payloads(content)
-    assert b"".join(data for _, data in parts if data).decode() == content
+    assert "".join(data.decode("utf-8-sig") for _, data in parts if data) == content
+    assert all(data.startswith(codecs.BOM_UTF8) for _, data in parts)
     assert all(len(data) <= 512 * 1024 for _, data in parts if data)
     assert payloads("😀" * 1000)[0][1] is not None
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        "!help — café 中文 😀\n" * 150,
+        "a" * 1799 + "😀" + "b" * 1800,
+        "word " * 800,
+        "😀" * 1800,
+    ],
+)
+def test_inline_pages_preserve_unicode_and_discord_limit(content):
+    parts = payloads(content, inline=True)
+    assert len(parts) > 1
+    assert "".join(text for text, _ in parts) == content
+    for text, data in parts:
+        assert data is None
+        assert len(text.encode("utf-16-le")) // 2 <= INLINE_UNITS
+        packet = f"{text}\n[dca:{'a' * 32}:8/8]"
+        assert len(packet.encode("utf-16-le")) // 2 <= 2000
+
+
+def test_inline_help_prefers_complete_lines_and_has_a_page_bound():
+    line = "!command — Unicode and complete instructions\n"
+    parts = payloads(line * 100, inline=True)
+    assert all(text.endswith("\n") for text, _ in parts)
+    assert payloads("", inline=True) == [("(empty result)", None)]
+    with pytest.raises(BridgeError, match="eight pages"):
+        payloads("x" * (INLINE_UNITS * MAX_INLINE_PAGES + 1), inline=True)
+
+
+async def test_inline_pages_reconcile_individually_and_complete_in_order():
+    t = Transport()
+    t.ambiguous = True
+    delivered = []
+    content = "!help — one command per line\n" * 100
+    d = Delivery(t, 0.03, lambda _: True, lambda *_: True, delivered.append)
+    d.start()
+    try:
+        d.text(content, result_id="help-response", inline=True)
+        await d.queue.join()
+    finally:
+        await d.close()
+    assert len(t.payloads) > 1 and d.failures == 0
+    assert "".join(text for text, _, _ in t.payloads) == content
+    assert all(data is None for _, data, _ in t.payloads)
+    assert len({marker for _, _, marker in t.payloads}) == t.sends
+    assert delivered == ["help-response"]
 
 
 async def test_ambiguous_send_reconciled_without_duplicate():

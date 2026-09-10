@@ -16,6 +16,8 @@ journalctl --user -u discord-coding-agent.service -n 200 --no-pager -o short-iso
 | Symptom | Check and recovery |
 | --- | --- |
 | No response to `!ping` | Follow the ordered [Discord guide](discord.md): token, same application, saved Message Content Intent, owner/guild/channel IDs, bot membership, text-channel and category overrides. |
+| `!help` downloads a file on mobile | Update to 0.2.1 or later and send `!help` again. New help responses appear directly in chat; old attachments remain as originally sent. Check the deployed commit with `deploy status` if using CD. |
+| Em dashes or other Unicode look garbled in a text attachment | New attachments in 0.2.1 include a UTF-8 signature to help viewers detect their encoding. Re-request help, or use `!last` for a new copy of the saved result. For older files, choose UTF-8 in the viewer. If new inline messages are affected, report the bridge version and a short non-sensitive example; no global punctuation replacement is performed. |
 | Wrong/stale repository or chat | Use `!status`, `!sessions`, `!session NAME` or `!repo PATH` in that channel. Only bridge commands change routing. Update to 0.2.0 for channel workspaces; follow [workspace setup](workspaces.md). |
 | Directory outside roots / non-Git folder | `!dirs` lists allowed host roots. Configure `WORKSPACE_ROOTS` locally (including the initial repo), then restart idle. Selection requires an existing Git working-tree root; create/clone it locally first. Symlink escapes are refused. |
 | Busy in another channel | `!status` reports the active coding channel. Work is serialized across the bot; the rejected message was not submitted. Wait, or `!stop` from a bound channel. Selection changes also wait during deployment. |
