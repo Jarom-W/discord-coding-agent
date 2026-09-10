@@ -6,7 +6,7 @@ Only the configured owner in the configured server can invoke commands. The init
 
 | Command | Effect |
 | --- | --- |
-| `!help` | Show commands and scope/limits. |
+| `!help` | Show commands and scope/limits in consecutive inline chat messages, readable on mobile without a download. |
 | `!ping` | Receive/send connectivity check, no Codex or model call. |
 | `!status` | Task phase, Gateway state, thread, selected mode, last verification, elapsed time, last observed event and age, pending IDs, interruption and delivery status. |
 | `!run 30m task text` | Submit a task with a bridge-enforced deadline. Use a positive number followed by `s`, `m` or `h` (e.g. `90s`, `30m`, `1.5h`). Overrides the configured default for this task only. |
@@ -29,6 +29,8 @@ Only the configured owner in the configured server can invoke commands. The init
 | `!last` | Send the selected session's last completed saved result again. No model invocation. |
 
 `ID` is the request ID displayed by this bridge, not a thread/item/message ID. Read the full details/attachments before deciding. Requests expire after `user_wait` seconds or when the turn ends, resolves, stops or the service restarts. Reconnects within the same running process retain still-pending requests. Stale controls remain unable to authorize anything even if Discord cannot remove their buttons immediately.
+
+Help preserves Unicode punctuation, including em dashes, in normal Discord message text. Large coding results and approval details still use complete text attachments; each file includes a UTF-8 encoding signature for text viewers. When reading an attachment programmatically, use `utf-8-sig` to decode that signature. No repository text is rewritten to replace punctuation.
 
 Ordinary messages submitted after completion resume the saved conversation. Requests arriving while busy are **not submitted**, not queued. The last 512 accepted/handled owner message IDs are deduplicated and persisted, including across process restart. Old deliveries outside that window are not guaranteed deduplicated. Attachments/stickers reject the entire incoming message; paths must be sent as ordinary text. Images, audio and uploaded files are not read.
 

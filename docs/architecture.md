@@ -24,7 +24,7 @@ The bridge has no inbound listener. Local execution runs on the Pi, while model 
 - `rpc.py`: owned subprocess group, bounded JSON frames/write queue, correlation futures, pipe failure handling.
 - `protocol.py`: exact 0.153.4 wire values and config/thread verification.
 - `engine.py`: authorization, message deduplication, task reservation, session selection, pending input and results.
-- `delivery.py`: bounded prioritized jobs, complete text attachments, retry/reconciliation, cosmetic isolation.
+- `delivery.py`: bounded prioritized jobs, inline help pages, complete text attachments, retry/reconciliation, cosmetic isolation.
 - `discord_client.py`: Gateway events, permissions, button acknowledgement and HTTP adapter.
 - `service.py` / `cli.py`: installation, unit escaping/validation, diagnostics and lifecycle commands.
 - `deployment.py`: opt-in outbound GitHub CI checks, separate release preparation, idle-only switching, readiness, rollback and retention.
@@ -64,6 +64,8 @@ An active reservation encountered after restart becomes interrupted. Neither it 
 Bounds: eight channels, 64 saved sessions, 8 MiB JSON frames, 64 queued RPC writes, 16 pending human requests, 64 recent action-detail items with a 4 MiB aggregate bound, 4 MiB accumulated assistant text, 32 outbound jobs per channel, 128 Discord cached messages, 512 persisted owner message IDs and 32 recent control IDs per session. Only one Codex child/task runs. High-volume/raw reasoning and delta events are discarded; stderr is drained and counted without retaining raw content. Complete long output is split into UTF-8-safe attachments of at most 512 KiB. There is no unbounded progress log buffer.
 
 Outbound messages have stable visible delivery markers. Before retrying ambiguous HTTP sends, the worker checks the last 100 bot-authored channel messages. This is bounded best-effort reconciliation, **not an exactly-once Discord guarantee**: deleted messages, history beyond that window or external changes can produce a duplicate. Failure to read history avoids sending blindly. Final results remain available via `!last`; coding work is never rerun to recover delivery. Buttons can look active while disconnected, but decisions always recheck live request state.
+
+Bridge-authored help explicitly selects inline pagination: at most eight pages of 1,800 UTF-16 code units each, split at line/word boundaries where possible. This reserves room for markers within [Discord's message content limit](https://docs.discord.com/developers/resources/message#create-message). All pages stay in one delivery job and are reconciled individually. Long model output and approval details keep attachment delivery to preserve code formatting. Each attachment includes a [UTF-8 signature](https://docs.python.org/3/library/codecs.html#encodings-and-unicode), counted within its 512 KiB bound, so file viewers can identify its encoding. Native message text stays Unicode; no legacy decode/re-encode or punctuation replacement is applied.
 
 Logs contain UTC timestamps, operation names, task/RPC/request correlation IDs, transitions and sanitized traceback function/line locations. They do not log prompt bodies, auth payloads, raw reasoning, source lines, locals or repository contents by default. Journald controls disk retention; see its local administrator settings if you need a smaller journal on SD storage.
 

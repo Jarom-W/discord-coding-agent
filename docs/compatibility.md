@@ -1,6 +1,10 @@
 # Compatibility and validation record
 
-Version 0.2.0; evidence collected **2026-09-09**. A checked protocol/configuration setting is not a guarantee of every tool, account or workload's behavior.
+Patch **0.2.1**, checked **2026-09-10 UTC**: **161 passed, 3 opt-in skips on each** of Python 3.11.16, 3.12.14, 3.13.15 and 3.14.7 on Linux x86-64. Lint/format, strict typing, wheel/sdist build and isolated wheel installation passed. Help is tested through the Gateway adapter with simulated channel I/O: complete inline pages, Unicode JSON round trips, no attachments/mentions/model calls, duplicate delivery, per-page reconciliation and message limits. Attachment tests cover UTF-8 signatures, Unicode across file boundaries and size limits. Real mobile-client rendering was not tested here.
+
+The Codex adapter baseline and updater protocol are unchanged. The real Codex checks recorded below were performed for 0.2.0; they were not rerun for this display-only patch. No live Discord or Pi service was modified during patch validation.
+
+The following **0.2.0 baseline record** was collected **2026-09-09**. A checked protocol/configuration setting is not a guarantee of every tool, account or workload's behavior.
 
 | Component | Supported / checked baseline | Evidence and limits |
 | --- | --- | --- |

@@ -1,12 +1,31 @@
+import codecs
 import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import discord
 
+from discord_coding_agent.delivery import payloads
 from discord_coding_agent.discord_client import BridgeClient, DiscordTransport
-from discord_coding_agent.engine import Pending
+from discord_coding_agent.engine import HELP, Pending
 from discord_coding_agent.state import StateStore
+from discord_coding_agent.workspaces import WORKSPACE_HELP
+
+
+async def test_text_attachment_reaches_discord_with_utf8_signature():
+    content = "Changes — café, 中文 and 😀\n" * 100
+    text, data = payloads(content)[0]
+    channel = SimpleNamespace(send=AsyncMock(return_value=SimpleNamespace(id=9)))
+    transport = DiscordTransport(SimpleNamespace())
+    transport.channel = AsyncMock(return_value=channel)
+    await transport.send(text, data, "[dca:unicode:1/1]", None)
+    file = channel.send.call_args.kwargs["file"]
+    try:
+        uploaded = file.fp.read()
+        assert uploaded.startswith(codecs.BOM_UTF8)
+        assert uploaded.decode("utf-8-sig") == content
+    finally:
+        file.close()
 
 
 async def test_buttons_styles_ids_and_no_mentions():
@@ -107,3 +126,47 @@ async def test_missing_channel_permissions_prevent_submission(config, tmp_path):
     client.workspaces.message.assert_not_awaited()
     assert client.delivery.queue.qsize() == 1
     await client.close()
+
+
+async def test_help_is_inline_complete_unicode_without_model_or_mentions(config, tmp_path):
+    client = BridgeClient(config, StateStore(tmp_path / "adapter-state", "identity", "manual"))
+    guild = SimpleNamespace(id=22, me=object())
+    channel = MagicMock(spec=discord.TextChannel)
+    channel.guild, channel.id, channel.type = guild, 33, discord.ChannelType.text
+    channel.permissions_for.return_value = discord.Permissions(
+        view_channel=True, send_messages=True, read_message_history=True, attach_files=True
+    )
+    channel.send = AsyncMock(return_value=SimpleNamespace(id=900))
+    client.get_channel = lambda _: channel
+    client.wait_until_ready = AsyncMock()
+    client.delivery.transport.find = AsyncMock(return_value=None)
+    message = SimpleNamespace(
+        author=SimpleNamespace(bot=False, id=11),
+        guild=guild,
+        channel=channel,
+        id=999,
+        content="!help",
+        attachments=[],
+        stickers=[],
+    )
+    client.delivery.start()
+    try:
+        await client.on_message(message)
+        await client.delivery.queue.join()
+        await client.on_message(message)  # Duplicate Gateway delivery must not send help twice.
+        await client.delivery.queue.join()
+        calls = channel.send.await_args_list
+        assert len(calls) == 2
+        sent = "".join(call.args[0].rpartition("\n")[0] for call in calls)
+        assert sent == WORKSPACE_HELP + "\n" + HELP
+        assert "\u2014" in sent and "\u00e2\u20ac\u201d" not in sent
+        for call in calls:
+            assert "file" not in call.kwargs
+            assert call.kwargs["allowed_mentions"].everyone is False
+            assert len(call.args[0].encode("utf-16-le")) // 2 <= 2000
+            # Exercise discord.py's actual JSON serializer, not a legacy file decoder.
+            wire = discord.utils._to_json({"content": call.args[0]})
+            assert json.loads(wire.encode("utf-8"))["content"] == call.args[0]
+        assert client.workspaces.active() is None and client.engine.rpc is None
+    finally:
+        await client.close()

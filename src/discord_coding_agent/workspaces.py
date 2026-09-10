@@ -60,8 +60,10 @@ class SessionSink:
     def status(self) -> str:
         return str(getattr(self.sink, "status", ""))
 
-    def text(self, content: str, *, result_id: str | None = None) -> None:
-        self.sink.text(f"Session: {self.record.name}\n{content}", result_id=result_id)
+    def text(self, content: str, *, result_id: str | None = None, inline: bool = False) -> None:
+        self.sink.text(
+            f"Session: {self.record.name}\n{content}", result_id=result_id, inline=inline
+        )
 
     def request(self, pending: Pending) -> None:
         self.sink.request(pending)
@@ -441,7 +443,7 @@ class Workspaces:
                     f"{cmd} takes no arguments; use !session NAME to select a session."
                 )
             if cmd == "!help":
-                sink.text(WORKSPACE_HELP + "\n" + HELP)
+                sink.text(WORKSPACE_HELP + "\n" + HELP, inline=True)
             elif cmd == "!dirs":
                 sink.text(
                     await asyncio.wait_for(

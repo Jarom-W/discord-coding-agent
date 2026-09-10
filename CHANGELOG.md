@@ -1,5 +1,13 @@
 # Release notes
 
+## 0.2.1 — 2026-09-10
+
+`!help` now appears directly in Discord chat as ordered messages, including the channel workspace commands, so mobile users can read it without downloading a text file. Pagination keeps complete lines where possible, preserves Unicode punctuation, and leaves room for Discord delivery markers. Pages share one bounded delivery job with per-page retry/reconciliation and message deduplication.
+
+Large results and approval details retain complete file delivery. Each text attachment now includes a UTF-8 signature so viewers can recognize em dashes, accented characters and other Unicode correctly; the size bound includes that signature. No prompt, repository content or saved result is rewritten. Existing attachments remain unchanged; send `!help` or `!last` again after deployment for the new format.
+
+No configuration, state-schema, Codex baseline or updater-protocol change is required. Existing CD installations can deploy this release after main CI succeeds and coding work is idle. See [validation scope](docs/compatibility.md); mobile-client rendering is not claimed as a live automated test.
+
 ## 0.2.0 — 2026-09-09
 
 Added channel workspaces and persistent named conversations: `!dirs`, `!repo [--fresh] PATH`, `!sessions`, `!session NAME`, `!name NAME`, and `!new [auto|manual] [NAME]`. One owner can bind additional private text channels in the configured server using the same bot. Each channel retains its selected repository/session across restarts, with session-labelled replies and per-session results/modes. `WORKSPACE_ROOTS` bounds directory selection; existing Git worktrees are required. Eight channels and 64 sessions are supported, with one coding task across the bot. Cross-channel `!stop` remains available; approvals remain scoped to their own channel/session/turn.
