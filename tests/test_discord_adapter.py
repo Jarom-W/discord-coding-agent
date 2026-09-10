@@ -1,13 +1,18 @@
+import asyncio
 import json
+import os
+from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import discord
 import pytest
+from conftest import StubRpc, approval, begin, complete
 
+from discord_coding_agent import deployment
 from discord_coding_agent.delivery import Delivery
 from discord_coding_agent.discord_client import BridgeClient, DiscordTransport
-from discord_coding_agent.engine import HELP, Pending
+from discord_coding_agent.engine import HELP, Origin, Pending
 from discord_coding_agent.state import StateStore
 from discord_coding_agent.workspaces import WORKSPACE_HELP
 
@@ -115,6 +120,120 @@ async def test_ready_record_tracks_validated_gateway_and_disconnect(config, tmp_
     await client.on_disconnect()
     assert json.loads(path.read_text())["ready"] is False
     await client.close()
+
+
+@pytest.fixture
+async def connected_client(config, monkeypatch):
+    config = replace(config, timeouts=replace(config.timeouts, user_wait=10))
+    monkeypatch.setenv("INVOCATION_ID", "resume-invocation")
+    client = BridgeClient(config, StateStore(config.state_dir, "identity", "manual"))
+    await client._async_setup_hook()  # Bind discord.py dispatch to this test loop; no login/socket.
+    guild = SimpleNamespace(id=22, me=object())
+    channel = MagicMock(spec=discord.TextChannel)
+    channel.guild, channel.type = guild, discord.ChannelType.text
+    channel.permissions_for.return_value = discord.Permissions(
+        view_channel=True, send_messages=True, read_message_history=True
+    )
+    client.get_guild = lambda _: guild
+    client.get_channel = lambda _: channel
+    await client.on_ready()
+    yield client, guild, channel
+    await client.close()
+
+
+async def test_real_resumed_dispatch_restores_deployment_readiness_without_replaying_work(
+    connected_client, owner, monkeypatch, tmp_path
+):
+    client, _, _ = connected_client
+    engine = client.engine
+    rpc = StubRpc(engine)
+
+    async def prepare():
+        engine.rpc, engine.state.thread_id = rpc, "thread-1"
+        engine.verified = True
+        engine.save()
+
+    engine._prepare = prepare
+    await begin(engine, owner)
+    pending = approval(engine)
+    worker, turn, calls = engine.worker, engine.turn_id, list(rpc.calls)
+    updater = deployment.Updater(
+        client.config, deployment.Settings("owner/project", tmp_path / "deploy")
+    )
+    monkeypatch.setattr(
+        deployment,
+        "run",
+        lambda *a, **k: (
+            f"ActiveState=active\nMainPID={os.getpid()}\nInvocationID=resume-invocation"
+        ),
+    )
+    assert updater.healthy()
+    await client.on_disconnect()
+    assert not updater.healthy() and not engine.connected and engine.busy
+    restored = asyncio.Event()
+    original = client.readiness
+
+    def readiness(ready):
+        original(ready)
+        if ready:
+            restored.set()
+
+    client.readiness = readiness
+    # Exercise the installed library's actual RESUMED parser/event dispatch, not on_ready.
+    client._connection.parse_resumed({})
+    await asyncio.wait_for(restored.wait(), 1)
+    assert updater.healthy() and client.workspaces.connected and engine.connected
+    assert engine.worker is worker and engine.turn_id == turn and engine.busy
+    assert engine.pending[pending.id] is pending and pending.message_id == 900
+    assert rpc.calls == calls and not rpc.closed
+    engine.decide(Origin(11, 22, 33, 999), pending.id, True, button_message=900)
+    complete(engine, "survived reconnect")
+    await worker
+    assert engine.state.last_result == "survived reconnect"
+
+
+@pytest.mark.parametrize("failure", ["guild", "member", "channel", "permissions"])
+async def test_resume_revalidates_primary_channel_access(connected_client, failure):
+    client, guild, channel = connected_client
+    await client.on_disconnect()
+    if failure == "guild":
+        client.get_guild = lambda _: None
+    elif failure == "member":
+        guild.me = None
+    elif failure == "channel":
+        channel.type = discord.ChannelType.news
+    else:
+        channel.permissions_for.return_value = discord.Permissions(view_channel=True)
+    await client.on_resumed()
+    assert json.loads((client.store.directory / "ready.json").read_text())["ready"] is False
+
+
+async def test_resume_recovers_delivery_once_and_does_not_repeat_greeting(connected_client):
+    client, _, _ = connected_client
+    client.engine.state.last_result = "waiting for Discord — " * 200
+    client.engine.state.result_id = "saved-result"
+    client.engine.state.delivered = False
+    client.engine.save()
+    before = client.delivery.queue.qsize()
+    for _ in range(2):
+        await client.on_disconnect()
+        await client.on_resumed()
+    assert client.delivery.queue.qsize() == before + 1  # One keyed result, no new greeting.
+    assert client.engine.rpc is None
+
+
+@pytest.mark.parametrize("event", ["on_ready", "on_resumed"])
+async def test_late_gateway_events_cannot_restore_readiness_during_shutdown(
+    connected_client, event
+):
+    client, _, _ = connected_client
+    client.shutting_down = True
+    try:
+        client.readiness(False)
+        await getattr(client, event)()
+        assert json.loads((client.store.directory / "ready.json").read_text())["ready"] is False
+    finally:
+        client.shutting_down = False
 
 
 async def test_missing_channel_permissions_prevent_submission(config, tmp_path):

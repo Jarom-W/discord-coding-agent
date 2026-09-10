@@ -389,7 +389,9 @@ class Updater:
 
     def healthy(self) -> bool:
         # Protocol 1 bots without release metadata still cooperate with safe idle updates.
-        return self.running() is not None
+        ready = self.running() is not None
+        log.info("deployment readiness=%s", "ready" if ready else "not_ready")
+        return ready
 
     def matches_release(self, ready: dict[str, Any] | None, sha: str) -> bool:
         if ready is None or not isinstance(ready.get("runtime"), dict):

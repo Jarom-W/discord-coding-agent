@@ -186,6 +186,16 @@ class BridgeClient(discord.Client):
                 engine.save()
 
     async def on_ready(self) -> None:
+        self.gateway_ready("ready")
+
+    async def on_resumed(self) -> None:
+        # A successful reconnect emits RESUMED instead of another READY. Both paths
+        # must restore the bridge's own connection flags and deployment readiness.
+        self.gateway_ready("resumed")
+
+    def gateway_ready(self, event: str) -> None:
+        if self.shutting_down:
+            return
         self.readiness(False)
         self.workspaces.connected = True
         for engine in self.workspaces.engines.values():
@@ -194,6 +204,7 @@ class BridgeClient(discord.Client):
         channel = self.get_channel(self.config.channel_id)
         if (
             not guild
+            or not guild.me
             or not isinstance(channel, discord.TextChannel)
             or channel.guild.id != guild.id
             or channel.type != discord.ChannelType.text
@@ -202,7 +213,6 @@ class BridgeClient(discord.Client):
                 "gateway=configuration_error; configured guild/channel inaccessible; check IDs and View Channels"
             )
             return
-        assert guild.me
         permissions = channel.permissions_for(guild.me)
         missing = [
             name
@@ -212,13 +222,6 @@ class BridgeClient(discord.Client):
         if missing:
             log.error("gateway=permissions_missing permissions=%s", ",".join(missing))
             return
-        log.info(
-            "gateway=ready user_id=%s bridge=%s revision=%s replies=%s",
-            self.user.id if self.user else None,
-            self.runtime.version,
-            self.runtime.revision or "unknown",
-            self.runtime.replies,
-        )
         for selected_id in self.workspaces.channels.values():
             if selected_id:
                 self.workspaces.engine(self.workspaces.sessions[selected_id])
@@ -245,6 +248,14 @@ class BridgeClient(discord.Client):
             )
 
         self.readiness(True)
+        log.info(
+            "gateway=ready source_event=%s user_id=%s bridge=%s revision=%s replies=%s",
+            event,
+            self.user.id if self.user else None,
+            self.runtime.version,
+            self.runtime.revision or "unknown",
+            self.runtime.replies,
+        )
 
     async def on_disconnect(self) -> None:
         self.workspaces.connected = False
