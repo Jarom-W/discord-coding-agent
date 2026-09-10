@@ -1,67 +1,82 @@
 """Bounded delivery with retries and history reconciliation, never coding-task retries."""
 
 import asyncio
-import codecs
 import logging
+import re
 import time
 import uuid
-from collections.abc import Callable
-from dataclasses import dataclass
+from collections.abc import Callable, Iterator
+from dataclasses import dataclass, field
 from typing import Protocol
 
 from .engine import Pending
 from .errors import BridgeError, LimitError, log_error
 
 log = logging.getLogger(__name__)
-ATTACHMENT_BYTES = 512 * 1024
-INLINE_UNITS = 1800  # Leave room for delivery markers within Discord's 2000-character limit.
-MAX_INLINE_PAGES = 8
+INLINE_UNITS = 1800  # Reserve room for markers within Discord's 2000-character limit.
+FENCE_UNITS = 100  # Bound repeated Markdown wrappers, including language labels.
+SOURCE_UNITS = INLINE_UNITS - 2 * (FENCE_UNITS + 1)
+FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})([^\r\n]*)[\r\n]*$")
 
 
-def inline_payloads(text: str) -> list[tuple[str, bytes | None]]:
-    """Page bridge-authored help at line/word boundaries, preserving Unicode verbatim."""
-    pages: list[tuple[str, bytes | None]] = []
-    while text:
-        if len(pages) == MAX_INLINE_PAGES:
-            raise BridgeError("Inline help exceeds eight pages; report this bridge help error.")
-        units = end = 0
-        for char in text:
-            width = 2 if ord(char) > 0xFFFF else 1
-            if units + width > INLINE_UNITS:
+@dataclass(frozen=True)
+class Page:
+    text: str
+    prefix: str = ""
+    suffix: str = ""
+
+    @property
+    def content(self) -> str:
+        return self.prefix + self.text + self.suffix
+
+
+def payloads(text: str) -> Iterator[Page]:
+    """Yield complete Unicode text as chat pages, reopening ordinary fenced code blocks.
+
+    Source text stays verbatim; prefix/suffix are presentation-only fence wrappers.
+    Work is linear in input size and only one page is built at a time.
+    """
+    if not text:
+        yield Page("(empty result)")
+        return
+    start = 0
+    fence: tuple[str, str] | None = None
+    while start < len(text):
+        units, end = 0, start
+        while end < len(text):
+            width = 2 if ord(text[end]) > 0xFFFF else 1
+            if units + width > SOURCE_UNITS:
                 break
             units += width
             end += 1
         if end < len(text):
-            end = text.rfind("\n", 0, end) + 1 or text.rfind(" ", 0, end) + 1 or end
-        pages.append((text[:end], None))
-        text = text[end:]
-    return pages
-
-
-def payloads(text: str, *, inline: bool = False) -> list[tuple[str, bytes | None]]:
-    if len(text.encode("utf-16-le")) // 2 <= INLINE_UNITS:
-        return [(text or "(empty result)", None)]
-    if inline:
-        return inline_payloads(text)
-    # Long results/diffs retain file delivery, including code fences. Each independently
-    # readable file has a UTF-8 signature so viewers do not guess a legacy encoding.
-    chunks: list[tuple[str, bytes | None]] = []
-    chunk = bytearray(codecs.BOM_UTF8)
-    for char in text:
-        encoded = char.encode("utf-8")
-        if len(chunk) + len(encoded) > ATTACHMENT_BYTES:
-            chunks.append(("Full text attached.", bytes(chunk)))
-            chunk = bytearray(codecs.BOM_UTF8)
-        chunk.extend(encoded)
-    if chunk:
-        chunks.append(("Full text attached.", bytes(chunk)))
-    return chunks
+            end = text.rfind("\n", start, end) + 1 or text.rfind(" ", start, end) + 1 or end
+        raw = text[start:end]
+        prefix = fence[1] + "\n" if fence else ""
+        line_start = start == 0 or text[start - 1] == "\n"
+        for line in raw.splitlines(keepends=True):
+            match = FENCE.fullmatch(line) if line_start else None
+            if match:
+                marker, info = match.groups()
+                if fence:
+                    if (
+                        marker[0] == fence[0][0]
+                        and len(marker) >= len(fence[0])
+                        and not info.strip()
+                    ):
+                        fence = None
+                elif (marker[0] != "`" or "`" not in info) and len(
+                    line.rstrip("\r\n").encode("utf-16-le")
+                ) // 2 <= FENCE_UNITS:
+                    fence = marker, line.rstrip("\r\n")
+            line_start = line.endswith("\n")
+        suffix = (("" if raw.endswith("\n") else "\n") + fence[0]) if fence else ""
+        yield Page(raw, prefix, suffix)
+        start = end
 
 
 class Transport(Protocol):
-    async def send(
-        self, text: str, data: bytes | None, marker: str, pending: Pending | None
-    ) -> int: ...
+    async def send(self, text: str, marker: str, pending: Pending | None) -> int: ...
     async def find(self, marker: str) -> int | None: ...
     async def disable(self, message_id: int) -> None: ...
     async def typing(self) -> None: ...
@@ -74,7 +89,8 @@ class Job:
     result_id: str | None = None
     pending: Pending | None = None
     disable_id: int | None = None
-    inline: bool = False
+    parts: Iterator[Page] | None = field(default=None, repr=False)
+    page: int = 0
 
 
 class Delivery:
@@ -104,25 +120,29 @@ class Delivery:
     def put(self, job: Job, priority: int) -> None:
         if job.key in self.keys:
             return
-        self.sequence += 1
-        try:
-            self.queue.put_nowait((priority, self.sequence, job))
-            self.keys.add(job.key)
-        except asyncio.QueueFull:
+        # Include the in-flight job so it always has room to requeue its next page.
+        if len(self.keys) >= self.queue.maxsize:
             self.failures += 1
             log.error(
                 "delivery=queue_full result=%s; saved result available via !last", job.result_id
             )
+            return
+        self.keys.add(job.key)
+        self.enqueue(job, priority)
 
-    def text(self, content: str, *, result_id: str | None = None, inline: bool = False) -> None:
+    def enqueue(self, job: Job, priority: int) -> None:
+        self.sequence += 1
+        self.queue.put_nowait((priority, self.sequence, job))
+
+    def text(self, content: str, *, result_id: str | None = None) -> None:
         self.put(
-            Job(content, result_id or uuid.uuid4().hex, result_id=result_id, inline=inline),
-            1 if result_id else 3,
+            Job(content, result_id or uuid.uuid4().hex, result_id=result_id),
+            3 if result_id else 2,
         )
 
     def request(self, pending: Pending) -> None:
         heading = f"Request {pending.id}\n{pending.method}\n"
-        self.put(Job(heading + pending.details, pending.id, pending=pending), 2)
+        self.put(Job(heading + pending.details, pending.id, pending=pending), 1)
 
     def invalidate(self, pending: Pending) -> None:
         if pending.message_id:
@@ -137,9 +157,7 @@ class Delivery:
         except Exception as exc:
             log_error(log, "cosmetic-typing", exc)
 
-    async def send_part(
-        self, text: str, data: bytes | None, marker: str, pending: Pending | None
-    ) -> int:
+    async def send_part(self, text: str, marker: str, pending: Pending | None) -> int:
         for attempt in range(3):
             started = time.monotonic()
             if pending and not self.valid(pending.id):
@@ -150,7 +168,7 @@ class Delivery:
                 return found
             try:
                 return await asyncio.wait_for(
-                    self.transport.send(text, data, marker, pending), self.timeout
+                    self.transport.send(text, marker, pending), self.timeout
                 )
             except (TimeoutError, OSError) as exc:
                 reported: BaseException = exc
@@ -168,17 +186,23 @@ class Delivery:
 
     async def run(self) -> None:
         while True:
-            _, _, job = await self.queue.get()
+            priority, _, job = await self.queue.get()
+            finished = True
             try:
                 if job.disable_id:
                     await asyncio.wait_for(self.transport.disable(job.disable_id), self.timeout)
                     continue
-                parts = payloads(job.text, inline=job.inline)
-                for index, (text, data) in enumerate(parts):
-                    marker = f"[dca:{job.key}:{index + 1}/{len(parts)}]"
-                    await self.send_part(
-                        text, data, marker, None if not job.pending else job.pending
-                    )
+                if job.parts is None:
+                    job.parts = payloads(job.text)
+                page = next(job.parts, None)
+                if page is not None:
+                    job.page += 1
+                    marker = f"[dca:{job.key}:inline:{job.page}]"
+                    await self.send_part(page.content, marker, job.pending)
+                    # Yield between pages: controls and short replies must stay responsive.
+                    self.enqueue(job, priority)
+                    finished = False
+                    continue
                 if job.pending:
                     pending = job.pending
                     if not self.valid(pending.id):
@@ -190,7 +214,7 @@ class Delivery:
                     )
                     # Controls are a separate message, after complete details were delivered.
                     message_id = await self.send_part(
-                        instruction, None, f"[dca:{job.key}:control]", pending
+                        instruction, f"[dca:{job.key}:control]", pending
                     )
                     if not self.bind(pending.id, message_id):
                         await asyncio.wait_for(self.transport.disable(message_id), self.timeout)
@@ -202,7 +226,8 @@ class Delivery:
                 self.failures += 1
                 log_error(log, f"delivery-{job.key}", exc)
             finally:
-                self.keys.discard(job.key)
+                if finished:
+                    self.keys.discard(job.key)
                 self.queue.task_done()
 
     async def close(self) -> None:

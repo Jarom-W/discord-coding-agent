@@ -1,6 +1,6 @@
 # Automatic deployment after merges to main
 
-The bridge already has GitHub Actions CI. Version **0.2.0** adds an opt-in **pull updater on the Pi**: it checks the public GitHub API for successful CI on `main`, prepares a release locally, waits until coding work is idle, and switches the managed service. GitHub never needs to connect into the Pi. Your laptop may be closed.
+The bridge has GitHub Actions CI and an opt-in **pull updater on the Pi**: it checks the public GitHub API for successful CI on `main`, prepares a release locally, waits until coding work is idle, and switches the managed service. GitHub never needs to connect into the Pi. Your laptop may be closed.
 
 ```mermaid
 flowchart TD
@@ -22,9 +22,9 @@ A local timer avoids placing a general Actions runner on the Codex host. GitHub 
 
 ## One-time activation — on the Pi
 
-Do this only for the bridge instance you intend to manage. It never adopts an unmanaged personal TARS unit. Existing instances are not changed just by merging or pulling this feature.
+Do this only for the bridge instance you intend to manage. It never adopts an unmanaged personal TARS unit. Automatic updates begin only after you install and enable the timer.
 
-1. Manually [update/reinstall the bridge](service.md#update-without-losing-credentials-or-conversation) to 0.2.0 or later, keeping private backups. Automatic adoption of 0.1.x is refused because that process does not participate in the task/maintenance lock or report the new readiness record.
+1. Manually [update/reinstall the bridge](service.md#update-without-losing-credentials-or-conversation) to the current release, keeping private backups. The running bot must participate in the task/maintenance lock and report readiness using updater protocol 1; automatic adoption of a non-cooperating process is refused.
 2. Run the normal `service install`, enable/start your managed bot, and confirm `!ping` and `!status` in Discord. Choose an idle time. Keep this bootstrap checkout/venv installed: it runs the updater itself, independently of the releases it deploys.
 3. Install and test the updater, substituting your fork's `OWNER/REPO` if desired:
 
@@ -112,7 +112,7 @@ Auto-deployment updates the bot's versioned release, not the bootstrap updater i
 In a disposable/test instance, merge a harmless change into your configured fork, wait for main CI, run `deploy check`, and compare `deploy status` with that main SHA. Confirm `!ping`, session continuity and a read-only task. Repeat with an active task: the updater should prepare/defer and leave the task running. Test failed readiness/rollback only in that disposable instance. The automated suite simulates these outcomes and validates units; it does not prove live Pi systemd/Gateway operation.
 
 - **No update:** inspect main's `push` CI, the configured public repository, timer state, user bus/linger, and `deploy status`. Failed/skipped/pending CI or active coding work defers deployment.
-- **Legacy/not ready:** install/restart 0.2.0 manually and confirm the primary channel works. The updater will not stop an older, non-cooperating process.
+- **Legacy/not ready:** install/restart the current release manually and confirm the primary channel works. The updater will not stop an older, non-cooperating process.
 - **Wrong/unmanaged unit:** use the correct `--config` and instance name. Do not alter marker lines to adopt a personal TARS service.
 - **Build/architecture/storage failure:** the previous bot remains running. Check wheel availability for your Python/ARM64 host, free space, available memory and the preparation timeout. Installer output is suppressed in journal logs to avoid leaking credentials; reproduce the named step locally in a disposable release to inspect it privately.
 - **Readiness or rollback failure:** inspect the bot journal, current unit, private deployment transaction, Message Content Intent/permissions/token and network. Preserve state; never blindly replay a previous coding request.

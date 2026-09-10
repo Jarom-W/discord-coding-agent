@@ -54,4 +54,8 @@ The target must be an intentionally disposable Git repository with a `.dca-dispo
 
 ## PR/release review
 
+Keep the README and setup guides focused on the current release’s commands and behavior. Put historical changes and version-specific migration/rollback notes in `CHANGELOG.md`. Retain exact dependency and protocol versions where needed for compatibility.
+
+Leave PRs open for review. Do not merge or enable auto-merge unless the maintainer explicitly requests it: merges into `main` can deploy automatically and restart TARS.
+
 Describe the trigger and changed behavior, tests actually run and remaining uncertainty. Run lint/format, strict source typing, tests and wheel/sdist builds. Review diff/staged files for secrets. Check every changed setup command against the CLI. Update release/compatibility notes with OS/architecture and actual outcomes; an x86 test is not ARM64 hardware validation. CI action references are full verified commit pins with read-only workflow permissions. GitHub PRs are the normal review path for contributors; no forced history replacement.

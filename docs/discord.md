@@ -29,9 +29,8 @@ Select only these permissions:
 - **View Channels** — see the selected channel.
 - **Send Messages** — replies and controls.
 - **Read Message History** — reconcile an HTTP timeout with a possibly already-sent result.
-- **Attach Files** — complete long answers and approval details.
 
-Do not grant Administrator. If using **OAuth2 → URL Generator** instead of Installation, select `bot` and the same permissions. See [OAuth2 scopes](https://docs.discord.com/developers/topics/oauth2) and [Discord permissions](https://docs.discord.com/developers/topics/permissions).
+Replies are split into inline messages, so Attach Files is unnecessary. Do not grant Administrator. If using **OAuth2 → URL Generator** instead of Installation, select `bot` and the same permissions. See [OAuth2 scopes](https://docs.discord.com/developers/topics/oauth2) and [Discord permissions](https://docs.discord.com/developers/topics/permissions).
 
 ## 5. Install into your server — in a browser/Discord
 
@@ -39,7 +38,7 @@ Copy the installation link, open it, choose **Add to server**, choose a server y
 
 ## 6. Create and grant access to a private text channel — in Discord
 
-Create a server text channel such as `#coding-agent`, mark it private, and grant your owner account and the bot access. Check **Edit Channel → Permissions**. Deny `@everyone` View Channel and explicitly allow the bot the four permissions above. Also check the parent category: a denied permission or synchronized category override can make the bot invisible or unable to send/attach files even when the invite requested those permissions.
+Create a server text channel such as `#coding-agent`, mark it private, and grant your owner account and the bot access. Check **Edit Channel → Permissions**. Deny `@everyone` View Channel and explicitly allow the bot the three permissions above. Also check the parent category: a denied permission or synchronized category override can make the bot invisible or unable to send messages even when the invite requested those permissions.
 
 Use a normal text channel, not a DM, thread, forum post, voice channel or announcement channel. Other accounts' messages are ignored even if they can see the channel. Channel privacy still matters because replies and code are visible to anyone with access, including server administrators.
 
@@ -82,5 +81,5 @@ Create another private normal text channel **in this same server** and repeat th
 - **Missing intent / wrong application:** revisit step 3. An empty message body is also a symptom of Message Content Intent problems.
 - **Incorrect IDs:** verify your user/server and initial text-channel IDs. Other users/servers are ignored. In an additional private channel, use an explicit command such as `!repo PATH` first; ordinary unbound-channel text is ignored.
 - **Invisible channel:** check bot membership and category/channel View Channel overrides.
-- **No send or no long reply:** check Send Messages, Read Message History and Attach Files. The journal reports missing permissions; `!last` recovers the saved result after they are fixed.
+- **No send or no long reply:** check Send Messages and Read Message History. The journal reports missing permissions; `!last` recovers the saved result after they are fixed.
 - **Network:** the Pi needs outbound internet/WebSocket and HTTPS connectivity. No incoming ports, router forwarding or **Interactions Endpoint URL** is used; leave that endpoint blank for this app.

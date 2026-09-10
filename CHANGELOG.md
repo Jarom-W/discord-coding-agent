@@ -1,5 +1,13 @@
 # Release notes
 
+## 0.2.2 — 2026-09-10
+
+All bot replies now appear inline in Discord, including long coding results, approval details, directory/session listings and `!last`. Removed the text-file fallback and help-only page cap. Pagination preserves Unicode and source text, splits at line/word boundaries, and closes/reopens ordinary fenced code blocks across pages. Attach Files is no longer a required bot permission.
+
+Large replies are paginated lazily within the existing result/queue bounds. Delivery yields between pages so approval controls and status replies can take priority; controls appear only after all request details arrive. Each page retains retry/reconciliation, and delivery failures leave the completed result available through `!last` without rerunning Codex.
+
+README and setup guides describe current instructions; historical migration notes remain here. No config/state-schema, Codex baseline or updater-protocol change is needed. See [validation scope](docs/compatibility.md). PRs remain open until explicitly authorized for merge, since main deployments can restart the bot.
+
 ## 0.2.1 — 2026-09-10
 
 `!help` now appears directly in Discord chat as ordered messages, including the channel workspace commands, so mobile users can read it without downloading a text file. Pagination keeps complete lines where possible, preserves Unicode punctuation, and leaves room for Discord delivery markers. Pages share one bounded delivery job with per-page retry/reconciliation and message deduplication.
@@ -16,13 +24,15 @@ Added opt-in pull deployment through `deploy install/enable/disable/check/status
 
 Original session state schema stays 1. A separate `workspaces.json` catalog indexes the original initial-channel state as `main`; other session states are stored under opaque IDs. Existing config/token/auth and the initial thread remain intact. Updater protocol 1 requires a manual bootstrap update to this release before auto-deployment can be enabled. See [workspace setup/recovery](docs/workspaces.md), [deployment setup/rollback](docs/deployment.md), and [validation scope](docs/compatibility.md). No personal TARS service was modified during implementation.
 
+For a manual rollback to 0.1.x, preserve `workspaces.json` and all session directories, and remove the unsupported `WORKSPACE_ROOTS` key from a private backed-up config. The older release exposes only the initial channel’s original session. Returning to a release with workspace support restores access to the retained catalog; do not restore old state to replay interrupted work.
+
 ## 0.1.1 — 2026-09-09
 
 Removed the default one-hour full-task deadline. `timeouts.task = 0` now means no full-task timer; explicit positive existing settings remain effective. Added `!run 30m task text` (positive `s`/`m`/`h` durations) and `!run unlimited task text` to override the default for one task in the selected conversation. Active task limits cannot be changed by another message. Acceptance, status and interrupted-task metadata report the chosen limit.
 
 Approval requirements, human-input expiry, initialization/RPC/transport/delivery/shutdown limits and `!stop` are retained. Natural-language constraints are forwarded unchanged; use the explicit command for a bridge-enforced timer. A completed/failed turn is never automatically continued just because its deadline is disabled. No account usage limits are removed.
 
-Upgrade/reinstall, change an explicit `[timeouts] task = 3600` to `task = 0` if desired, then restart while idle; see [update/rollback instructions](docs/service.md#removing-the-old-one-hour-limit-011). State schema remains 1, with optional task-limit metadata inside existing active/interrupted records. Before rollback to 0.1.0, replace `task = 0` with a positive value or remove the key. No personal service/configuration is modified by this release.
+Upgrade/reinstall, change an explicit `[timeouts] task = 3600` to `task = 0` if desired, then restart while idle; see [update/rollback instructions](docs/service.md#task-limits-and-saved-conversations). State schema remains 1, with optional task-limit metadata inside existing active/interrupted records. Before rollback to 0.1.0, replace `task = 0` with a positive value or remove the key. No personal service/configuration is modified by this release.
 
 Regression coverage includes a simulated scheduler advance beyond one hour, timed interruption during human wait, unlimited-task approval/stop behavior, duration validation, busy/deduplicated/unauthorized requests, and per-task override isolation. See [validation evidence](docs/compatibility.md).
 

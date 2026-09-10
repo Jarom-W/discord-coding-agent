@@ -1,7 +1,6 @@
 """discord.py Gateway adapter. No inbound server or slash command registration."""
 
 import asyncio
-import io
 import json
 import logging
 import os
@@ -38,9 +37,7 @@ class DiscordTransport:
             )
         return channel
 
-    async def send(
-        self, text: str, data: bytes | None, marker: str, pending: Pending | None
-    ) -> int:
+    async def send(self, text: str, marker: str, pending: Pending | None) -> int:
         channel = await self.channel()
         view: discord.ui.View | None = None
         # Only the final control message gets buttons, after all details are delivered.
@@ -61,8 +58,6 @@ class DiscordTransport:
                 )
             )
         kwargs: dict[str, Any] = {"allowed_mentions": discord.AllowedMentions.none(), "view": view}
-        if data is not None:
-            kwargs["file"] = discord.File(io.BytesIO(data), filename="codex-details.txt")
         try:
             message = await channel.send(f"{text}\n{marker}", **kwargs)
             return message.id
@@ -70,7 +65,7 @@ class DiscordTransport:
             if exc.status >= 500 or exc.status == 429:
                 raise OSError("Transient Discord delivery failure") from None
             raise BridgeError(
-                f"Discord send failed (HTTP {exc.status}); check Send Messages and Attach Files permissions."
+                f"Discord send failed (HTTP {exc.status}); check Send Messages permissions."
             ) from None
         finally:
             # Global on_interaction handles stale controls too; don't retain view callbacks.
@@ -209,7 +204,7 @@ class BridgeClient(discord.Client):
         permissions = channel.permissions_for(guild.me)
         missing = [
             name
-            for name in ["view_channel", "send_messages", "read_message_history", "attach_files"]
+            for name in ["view_channel", "send_messages", "read_message_history"]
             if not getattr(permissions, name)
         ]
         if missing:
@@ -265,7 +260,7 @@ class BridgeClient(discord.Client):
         permissions = message.channel.permissions_for(message.guild.me)
         missing = [
             name
-            for name in ["view_channel", "send_messages", "read_message_history", "attach_files"]
+            for name in ["view_channel", "send_messages", "read_message_history"]
             if not getattr(permissions, name)
         ]
         if missing:

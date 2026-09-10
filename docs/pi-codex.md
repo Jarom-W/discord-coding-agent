@@ -97,7 +97,7 @@ git -C "$HOME/work/target" status
 
 For private repositories, authenticate Git locally through your usual SSH/credential mechanism. Do not embed a token in the Git remote URL. `CODEX_REPO` must be the actual working-tree root, not a subdirectory. Linked worktrees are accepted and included in repository identity.
 
-`CODEX_REPO` is the initial selection. In 0.2.0, browse other host directories with `!dirs` and select existing repositories with `!repo PATH` in Discord. Keep projects under configured `WORKSPACE_ROOTS` (default: the initial repository's parent). Each Discord channel may select its own repository and named session; [workspace setup](workspaces.md) covers the commands. This does not create or clone a Git repository automatically.
+`CODEX_REPO` is the initial selection. Browse other host directories with `!dirs` and select existing repositories with `!repo PATH` in Discord. Keep projects under configured `WORKSPACE_ROOTS` (default: the initial repository's parent). Each Discord channel may select its own repository and named session; [workspace setup](workspaces.md) covers the commands. This does not create or clone a Git repository automatically.
 
 Then follow the README's installation commands under `~/services/discord-coding-agent`. Keep config/state outside **both** repositories. The code rejects config/state within the selected coding repository and rejects using the bridge installation as the target.
 
