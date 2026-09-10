@@ -113,6 +113,8 @@ def test_effective_thread_verification(tmp_path, mode):
 
 async def test_process_reviewer_failure(tmp_path):
     class Stub:
+        timeouts = Timeouts()
+
         async def call(self, *_):
             return {"config": {"approval_policy": "on-request", "sandbox_mode": "workspace-write"}}
 

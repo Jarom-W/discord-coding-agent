@@ -67,6 +67,10 @@ async def doctor(config: Config, probe: bool, discord_check: bool) -> bool:
     print(f"Config: {config.path}\nRepository: {config.repo}\nState: {config.state_dir}")
     print("Workspace roots: " + ", ".join(str(root) for root in config.roots))
     print(
+        "Timeouts (seconds): "
+        + ", ".join(f"{name}={value:g}" for name, value in vars(config.timeouts).items())
+    )
+    print(
         f"Workspace catalog: {config.state_dir / 'workspaces.json'}; updater settings present: {deployment.settings_path(config).exists()}"
     )
     print(

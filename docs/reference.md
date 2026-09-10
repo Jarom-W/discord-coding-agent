@@ -8,7 +8,7 @@ Only the configured owner in the configured server can invoke commands. The init
 | --- | --- |
 | `!help` | Show commands and scope/limits in consecutive inline chat messages, readable on mobile without a download. |
 | `!ping` | Receive/send connectivity check, no Codex or model call. |
-| `!status` | Task phase, Gateway state, thread, selected mode, last verification, elapsed time, last observed event and age, pending IDs, interruption and delivery status. |
+| `!status` | Task phase, Gateway state, thread, selected mode, last verification, elapsed time, last observed activity and age, preparation step/budget, pending IDs, interruption and delivery status. |
 | `!run 30m task text` | Submit a task with a bridge-enforced deadline. Use a positive number followed by `s`, `m` or `h` (e.g. `90s`, `30m`, `1.5h`). Overrides the configured default for this task only. |
 | `!run unlimited task text` | Submit a task with no full-task deadline, overriding the configured default for this task only. |
 | `!dirs [PATH]` | List allowed workspace roots, or immediate directories under a root. No file contents/model call. |
@@ -84,14 +84,14 @@ All values are finite **seconds**. `task = 0` disables the full-task deadline; a
 
 | `[timeouts]` key | Default | Operation and outcome |
 | --- | ---: | --- |
-| `initialization` | 120 | Overall version/process/handshake/config/thread preparation. Failure interrupts reservation; no prompt replay. |
-| `request` | 45 | One RPC response, including `turn/start` acknowledgement. A lost acknowledgement is uncertain work. Never resend automatically. |
+| `initialization` | 120 | Shared budget for repository/version/process checks, handshake, config verification and thread start/resume. Preparation RPCs use this budget instead of `request`. The total is not reset between stages. Failure preserves the session and reports the last step; no prompt replay. |
+| `request` | 45 | One ordinary RPC response, including `turn/start` acknowledgement after preparation. A lost acknowledgement is uncertain work. Never resend automatically. |
 | `transport` | 20 | Incomplete JSON frame after the first byte, or pipe write drain. There is **no idle stdout-read timer**. |
 | `task` | 0 | No full-task deadline. A positive value sets the default complete task budget, including initialization and human input wait, starting when the task runner begins. `!run` overrides it for one task. |
 | `user_wait` | 900 | Individual pending approval/question. Expiry sends an RPC error without approval and invalidates controls; Codex may continue/finish. |
 | `delivery` | 30 | Individual Discord send/history/disable operation. Transient sends use at most three attempts with 1s/2s backoff and history reconciliation. |
 | `shutdown` | 10 | Each interruption acknowledgement/wait/process-termination stage; service stop timeout is derived from these stages. |
 
-A 45-second RPC timeout is separate from the optional full-task deadline. Errors name the operation, measured elapsed time, configured limit and diagnostic next step. Human wait counts against its own timeout and any enabled overall deadline. Disabling the task deadline does not disable approval checks, RPC/connection timeouts, `!stop`, Codex completion/failure, or account usage limits. Quiet logs alone never trigger cancellation. HTTP typing attempts have a cosmetic limit of at most 5 seconds and cannot cancel a task.
+Thread loading can take longer than a short question suggests: it happens before the question is submitted. It shares the initialization budget; ordinary RPCs retain their separate 45-second default. `!run unlimited` disables only the full-task deadline. `!status` shows the current or last preparation step; `doctor` prints configured timeout values. Errors name the operation, measured elapsed time, configured limit and diagnostic next step. Human wait counts against its own timeout and any enabled overall deadline. Disabling the task deadline does not disable approval checks, RPC/connection timeouts, `!stop`, Codex completion/failure, or account usage limits. Quiet logs alone never trigger cancellation. HTTP typing attempts have a cosmetic limit of at most 5 seconds and cannot cancel a task.
 
 An explicit positive `task` value in private config overrides the no-deadline default. Set `task = 0` in the existing `[timeouts]` table and restart while idle to disable that limit. If the key is absent, no full-task deadline applies. `!status` reports the effective default; `!run` overrides it for one new task.

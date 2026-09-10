@@ -39,6 +39,8 @@ RPC requests have IDs and individual futures. Out-of-order responses resolve the
 
 Task phases are idle, initializing, running, awaiting approval, awaiting answer, stopping and failed. Gateway disconnected status is independent and displayed alongside the task phase. A typing indicator is decorative. Meaningful thread events update last observed activity, and the status reports event age without diagnosing quiet work as stuck.
 
+Preparation stages are reported in `!status` and logged with the task ID. Repository/version checks, child startup, `initialize`, `config/read` and thread start/resume share one initialization deadline. Preparation RPCs use the initialization limit, with the outer deadline capping their combined time. Later RPCs such as `turn/start` retain the ordinary request limit. An initialization timeout names the last preparation step and confirms that this task’s prompt was not submitted; an uncertain `turn/start` timeout makes no such claim.
+
 Full-task deadlines are opt-in: `timeouts.task = 0` means no scheduled cancellation. An explicit `!run` duration overrides the default for one atomic reservation and is recorded in active/interrupted task metadata. Enabled deadlines include initialization and human wait. Initialization, RPC, transport, human-input, delivery and shutdown limits remain separate and bounded. The bridge ends each task on Codex completion and never submits another turn automatically to fill a time budget.
 
 ## Atomic task and approval ownership
