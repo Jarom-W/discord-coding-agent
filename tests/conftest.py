@@ -13,7 +13,7 @@ class MemorySink:
         self.requests = []
         self.invalidated = []
 
-    def text(self, content, *, result_id=None, inline=False):
+    def text(self, content, *, result_id=None):
         self.texts.append((content, result_id))
 
     def request(self, pending):

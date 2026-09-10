@@ -78,7 +78,7 @@ class Pending:
 
 
 class Sink(Protocol):
-    def text(self, content: str, *, result_id: str | None = None, inline: bool = False) -> None: ...
+    def text(self, content: str, *, result_id: str | None = None) -> None: ...
     def request(self, pending: Pending) -> None: ...
     def invalidate(self, pending: Pending) -> None: ...
 
@@ -220,7 +220,7 @@ class Engine:
         if cmd in {"!help", "!ping", "!status", "!approvals", "!last", "!stop"} and len(parts) != 1:
             raise BridgeError(f"{cmd} takes no arguments; see !help.")
         if cmd == "!help":
-            self.sink.text(HELP, inline=True)
+            self.sink.text(HELP)
         elif cmd == "!ping":
             self.sink.text(
                 f"{self.config.display_name}: pong — Discord receive/send works; no model invoked."

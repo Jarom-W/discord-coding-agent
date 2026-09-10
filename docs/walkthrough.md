@@ -98,7 +98,7 @@ Only after the disconnect test, and while no task is running, deliberately reboo
 
 ## 10. Channel workspaces and session return
 
-**In Discord:** use `!name demo continuity`, `!new manual second conversation`, and `!sessions`. Return with `!session demo continuity` and ask about the remembered word. Create another private normal text channel in the same server, grant the existing bot its four permissions, and send `!repo ~/work/codex-bridge-demo` there. Expect a separate session/thread. While a task runs in either channel, an ordinary message in the other must be rejected as not submitted; `!status` identifies the active channel and `!stop` can interrupt it. Restart idle and check both selections persist. See [workspace setup](workspaces.md).
+**In Discord:** use `!name demo continuity`, `!new manual second conversation`, and `!sessions`. Return with `!session demo continuity` and ask about the remembered word. Create another private normal text channel in the same server, grant the existing bot View Channels, Send Messages and Read Message History, and send `!repo ~/work/codex-bridge-demo` there. Expect a separate session/thread. While a task runs in either channel, an ordinary message in the other must be rejected as not submitted; `!status` identifies the active channel and `!stop` can interrupt it. Restart idle and check both selections persist. See [workspace setup](workspaces.md).
 
 ## 11. Optional automatic update acceptance
 

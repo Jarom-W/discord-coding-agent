@@ -91,17 +91,11 @@ systemctl --user start discord-coding-agent.service
 
 The installed package is a non-editable copy: updating Git alone does not update running code. Run the pip reinstall. Do not rerun setup unless changing config. This procedure leaves config/state/auth untouched; it does not upgrade Codex. Review its compatibility separately.
 
-### Removing the old one-hour limit (0.1.1)
+### Task limits and saved conversations
 
-The new default has no full-task deadline. If private configuration explicitly contains `task = 3600` under `[timeouts]`, that setting is preserved. After the backup above, edit that value to `task = 0`, then restart **your bridge instance** while idle. Do not add a second `[timeouts]` table. Other timeout values remain positive and unchanged. If the `task` key is absent, the new default applies after reinstall/restart without a config edit. In Discord, `!status` should show `Default task limit: none (unlimited)` when idle. `!run 30m task text` sets a deadline for one task; `!run unlimited task text` removes it for one task even with a positive configured default.
+The default has no full-task deadline. An explicit positive `task` value under `[timeouts]` overrides it. To remove that limit, edit the existing table to `task = 0`, then restart while idle. Do not add a second `[timeouts]` table. `!status` should show `Default task limit: none (unlimited)` when idle. Use `!run 30m task text` to set a deadline for one task, or `!run unlimited task text` to remove it for one task.
 
-State schema remains 1; credentials, thread selection and approval mode are preserved. Before rolling back to 0.1.0, remove `task = 0` or restore a positive value: 0.1.0 requires all timeouts to be positive and otherwise refuses startup. Never restore active work to replay it.
-
-### Channel workspaces and automatic deployment (0.2.0)
-
-The original `state.json` becomes the initial channel's saved `main` session and remains in place. The separate `workspaces.json` catalog and per-session state directories preserve additional conversations. Back up the whole state directory, not just its original state file. See [workspace setup](workspaces.md) for `WORKSPACE_ROOTS` and Discord commands. To opt into automatic updates after successful main CI, follow [deployment setup](deployment.md); merging this feature does not activate a timer on your Pi.
-
-For a manual rollback to 0.1.x, preserve catalog/session files and remove the unsupported `WORKSPACE_ROOTS` key from a private backed-up config. The old release can access only the original session. Deployment rollback among cooperating 0.2.x releases preserves the current catalog and state and never restores an older transcript automatically.
+Back up the whole state directory: `state.json`, `workspaces.json` and all per-session state directories. See [workspace setup](workspaces.md) for repository/session selection and [deployment setup](deployment.md) to opt into automatic updates after successful main CI.
 
 ## Rollback
 
@@ -117,7 +111,7 @@ git switch --detach "$(cat "$dca_backup/previous-commit.txt")"
 systemctl --user start discord-coding-agent.service
 ```
 
-If a newer release changed state schema, consult its migration notes before restoring the saved state directory. Keep the current state as a second private backup. Never restore state while a service owns its lock, and never assume restoring state reverts repository edits or remote actions. This initial release has schema 1 and refuses unknown schemas, preserving a timestamped backup instead of guessing a migration.
+If a newer release changed state schema, consult its migration notes before restoring the saved state directory. Keep the current state as a second private backup. Never restore state while a service owns its lock, and never assume restoring state reverts repository edits or remote actions. Session state and workspace catalogs use schema 1 and refuse unknown schemas, preserving a timestamped backup instead of guessing a migration. Check the target release’s configuration and schema requirements in the [release notes](../CHANGELOG.md) before downgrading.
 
 ## Uninstall
 

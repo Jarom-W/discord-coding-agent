@@ -1,31 +1,40 @@
-import codecs
 import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import discord
 
-from discord_coding_agent.delivery import payloads
+from discord_coding_agent.delivery import Delivery
 from discord_coding_agent.discord_client import BridgeClient, DiscordTransport
 from discord_coding_agent.engine import HELP, Pending
 from discord_coding_agent.state import StateStore
 from discord_coding_agent.workspaces import WORKSPACE_HELP
 
 
-async def test_text_attachment_reaches_discord_with_utf8_signature():
-    content = "Changes — café, 中文 and 😀\n" * 100
-    text, data = payloads(content)[0]
+async def test_large_result_reaches_discord_inline_with_unicode_and_no_files():
+    content = "Changes — café, 中文 and 😀 @everyone\n" * 1000
     channel = SimpleNamespace(send=AsyncMock(return_value=SimpleNamespace(id=9)))
     transport = DiscordTransport(SimpleNamespace())
     transport.channel = AsyncMock(return_value=channel)
-    await transport.send(text, data, "[dca:unicode:1/1]", None)
-    file = channel.send.call_args.kwargs["file"]
+    transport.find = AsyncMock(return_value=None)
+    completed = []
+    delivery = Delivery(transport, 1, lambda _: True, lambda *_: True, completed.append)
+    delivery.start()
     try:
-        uploaded = file.fp.read()
-        assert uploaded.startswith(codecs.BOM_UTF8)
-        assert uploaded.decode("utf-8-sig") == content
+        delivery.text(content, result_id="result")
+        await delivery.queue.join()
     finally:
-        file.close()
+        await delivery.close()
+    calls = channel.send.await_args_list
+    assert len(calls) > 8
+    assert "".join(call.args[0].rpartition("\n")[0] for call in calls) == content
+    assert completed == ["result"]
+    for call in calls:
+        assert "file" not in call.kwargs and "files" not in call.kwargs
+        assert call.kwargs["allowed_mentions"].everyone is False
+        assert len(call.args[0].encode("utf-16-le")) // 2 <= 2000
+        wire = discord.utils._to_json({"content": call.args[0]})
+        assert json.loads(wire.encode("utf-8"))["content"] == call.args[0]
 
 
 async def test_buttons_styles_ids_and_no_mentions():
@@ -33,7 +42,7 @@ async def test_buttons_styles_ids_and_no_mentions():
     transport = DiscordTransport(SimpleNamespace())
     transport.channel = AsyncMock(return_value=channel)
     pending = Pending("random-id", 1, "item/fileChange/requestApproval", {}, "task", "turn")
-    assert await transport.send("details", None, "[dca:random-id:control]", pending) == 9
+    assert await transport.send("details", "[dca:random-id:control]", pending) == 9
     kwargs = channel.send.call_args.kwargs
     assert kwargs["allowed_mentions"].everyone is False
     buttons = kwargs["view"].children
@@ -89,7 +98,7 @@ async def test_ready_record_tracks_validated_gateway_and_disconnect(config, tmp_
     channel.guild = guild
     channel.type = discord.ChannelType.text
     channel.permissions_for.return_value = discord.Permissions(
-        view_channel=True, send_messages=True, read_message_history=True, attach_files=True
+        view_channel=True, send_messages=True, read_message_history=True
     )
     client.get_guild = lambda _: guild
     client.get_channel = lambda _: channel
@@ -113,7 +122,7 @@ async def test_missing_channel_permissions_prevent_submission(config, tmp_path):
     channel = MagicMock(spec=discord.TextChannel)
     channel.guild, channel.id, channel.type = guild, 44, discord.ChannelType.text
     channel.permissions_for.return_value = discord.Permissions(
-        view_channel=True, send_messages=True, read_message_history=True
+        view_channel=True, send_messages=True
     )
     message = SimpleNamespace(
         author=SimpleNamespace(bot=False, id=11),
@@ -134,7 +143,7 @@ async def test_help_is_inline_complete_unicode_without_model_or_mentions(config,
     channel = MagicMock(spec=discord.TextChannel)
     channel.guild, channel.id, channel.type = guild, 33, discord.ChannelType.text
     channel.permissions_for.return_value = discord.Permissions(
-        view_channel=True, send_messages=True, read_message_history=True, attach_files=True
+        view_channel=True, send_messages=True, read_message_history=True
     )
     channel.send = AsyncMock(return_value=SimpleNamespace(id=900))
     client.get_channel = lambda _: channel

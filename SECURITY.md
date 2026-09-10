@@ -1,6 +1,6 @@
 # Security policy and limitations
 
-This independent community bridge gives its configured owner access to a real coding agent. It is not a hardened multi-user sandbox, confidential workspace boundary, or official OpenAI/Discord product. Version 0.2.x receives fixes on the maintained main branch; older releases should be updated through the documented backup/recovery procedure.
+This independent community bridge gives its configured owner access to a real coding agent. It is not a hardened multi-user sandbox, confidential workspace boundary, or official OpenAI/Discord product. The current release receives fixes on the maintained main branch; update through the documented backup/recovery procedure.
 
 ## Boundaries
 
@@ -8,7 +8,7 @@ This independent community bridge gives its configured owner access to a real co
 - `WORKSPACE_ROOTS` bounds directory browsing/selection and rejects symlink escapes. It is not a tool-level confidential-read boundary. Keep config/state/bridge releases separate from coding repositories and select project roots deliberately. Channel/session labels do not create separate Linux users or sandboxes.
 - Codex executes locally as the bridge's Linux account. Workspace-write limits are **not** a confidential-read boundary around a repository. Other files readable by that account, Git credentials, installed tools, MCP servers and configured plugins may be accessible. Use a dedicated Linux account or host for stronger separation; do not put highly sensitive material on an agent host merely because the selected repository is separate.
 - Sandbox exceptions can authorize more access. Both human and automatic-review decisions can be consequential. Auto-review retains the workspace sandbox and managed restrictions; it is not a guarantee that actions are harmless. The bridge never silently grants all requests or switches to full access.
-- The owner, Codex model, repository instructions and external content can influence tool execution. Untrusted repository content can contain prompt injection. Review commands, complete attachments and diffs; use disposable branches/repositories and appropriate backups.
+- The owner, Codex model, repository instructions and external content can influence tool execution. Untrusted repository content can contain prompt injection. Review commands, all request pages and diffs; use disposable branches/repositories and appropriate backups.
 - Ordinary permitted workspace edits may happen without a manual prompt. Stopping a task cannot undo edits, network effects or changes already made. A process that intentionally detaches itself can escape a process group outside systemd; the service cgroup provides additional cleanup, not a complete containment boundary.
 - Results and request details are sent through Discord and model/context data through Codex's service. Avoid secrets in prompts and output. Server administrators can access server configuration/channel permissions. Outgoing mentions are disabled but text may still contain untrusted links or formatting.
 - Tokens/config/state are kept outside the coding repository, mode 600/700. Discord variables are removed from the Codex child environment, but same-account file/proc access is still a concern. Never commit auth caches, logs, transcripts or state. Private backups also contain sensitive data.
