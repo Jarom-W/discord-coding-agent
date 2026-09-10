@@ -4,6 +4,8 @@ These commands run **on the Pi as the same regular user who installed/authentica
 
 ## Install and start
 
+After the foreground test, wait until coding work is idle, press **Ctrl+C in the terminal running the bridge**, and wait for the shell prompt before starting the service below. The foreground process holds the same state lock; starting a second copy causes `Another bridge owns the state lock`. Keep `process.lock` in place: the operating system releases the lock when its owning process exits.
+
 ```bash
 cd "$HOME/services/discord-coding-agent"
 .venv/bin/discord-coding-agent service render
@@ -38,6 +40,8 @@ loginctl show-user "$USER" -p Linger
 Expect `Linger=yes`. The installer does not invoke sudo or change linger for you. A user-bus failure often means you used `sudo`, `su`, cron, or an SSH environment without a user systemd session. Log in directly as the service user and check `loginctl user-status "$USER"`. On normal Debian/Pi OS the login should establish `/run/user/UID` and the user bus. Do not blindly hard-code someone else's UID or bus address.
 
 ## Daily operations and full logs
+
+Choose and run individual commands below for the operation you need. **Ctrl+C** while viewing `journalctl -f` exits the log viewer; the bot keeps running.
 
 ```bash
 systemctl --user status discord-coding-agent.service --no-pager -l
