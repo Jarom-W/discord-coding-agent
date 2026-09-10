@@ -7,8 +7,8 @@ Only the configured owner in the configured server can invoke commands. The init
 | Command | Effect |
 | --- | --- |
 | `!help` | Show commands and scope/limits in consecutive inline chat messages, readable on mobile without a download. |
-| `!ping` | Receive/send connectivity check, no Codex or model call. |
-| `!status` | Task phase, Gateway state, thread, selected mode, last verification, elapsed time, last observed activity and age, preparation step/budget, pending IDs, interruption and delivery status. |
+| `!ping` | Receive/send connectivity check with the running bridge version, managed release revision when available, and reply format; no Codex or model call. |
+| `!status` | Running bridge version/revision/reply format, task phase, Gateway state, thread, selected mode, last verification, elapsed time, last observed activity and age, preparation step/budget, pending IDs, interruption and delivery status. |
 | `!run 30m task text` | Submit a task with a bridge-enforced deadline. Use a positive number followed by `s`, `m` or `h` (e.g. `90s`, `30m`, `1.5h`). Overrides the configured default for this task only. |
 | `!run unlimited task text` | Submit a task with no full-task deadline, overriding the configured default for this task only. |
 | `!dirs [PATH]` | List allowed workspace roots, or immediate directories under a root. No file contents/model call. |

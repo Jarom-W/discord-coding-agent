@@ -16,7 +16,7 @@ journalctl --user -u discord-coding-agent.service -n 200 --no-pager -o short-iso
 | Symptom | Check and recovery |
 | --- | --- |
 | No response to `!ping` | Follow the ordered [Discord guide](discord.md): token, same application, saved Message Content Intent, owner/guild/channel IDs, bot membership, text-channel and category overrides. |
-| Replies download as text files on mobile | Current replies are inline, including long results. Check the running commit with `deploy status` if using CD, then send `!help` or `!last` for a fresh copy. Existing posted files stay unchanged. |
+| Replies download as text files on mobile | Current bridge code cannot upload files. Check the new message's author, timestamp and delivery marker, then the running version/reply format in `!ping`. Follow [running-installation verification](deployment.md#verify-the-running-bot); a checkout's HEAD or saved deployment SHA alone is insufficient. After correcting the installation, `!last` sends a fresh inline copy without rerunning Codex. Existing posted files stay unchanged. |
 | Em dashes or other Unicode look garbled | Inline replies preserve Unicode. Use `!last` for a fresh chat copy of a saved result. If a new message is garbled, report the running bridge version and a short non-sensitive example. |
 | Wrong/stale repository or chat | Use `!status`, `!sessions`, `!session NAME` or `!repo PATH` in that channel. Only bridge commands change routing; follow [workspace setup](workspaces.md). |
 | Directory outside roots / non-Git folder | `!dirs` lists allowed host roots. Configure `WORKSPACE_ROOTS` locally (including the initial repo), then restart idle. Selection requires an existing Git working-tree root; create/clone it locally first. Symlink escapes are refused. |

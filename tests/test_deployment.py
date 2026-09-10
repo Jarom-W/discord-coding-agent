@@ -82,6 +82,21 @@ def updater(config, tmp_path, monkeypatch):
     monkeypatch.setattr(u.github, "head", lambda: FIRST)
     monkeypatch.setattr(u.github, "passed", lambda _: True)
     monkeypatch.setattr(u, "healthy", lambda: True)
+    prefix = settings.directory / "releases" / FIRST / ".venv"
+    monkeypatch.setattr(
+        u,
+        "running",
+        lambda: {
+            "runtime": {
+                "version": "test-version",
+                "revision": FIRST,
+                "repository": settings.repository,
+                "python": str(prefix / "bin/python"),
+                "package": str(prefix / "lib/python3.13/site-packages/discord_coding_agent"),
+                "replies": "inline-text",
+            }
+        },
+    )
     monkeypatch.setattr(u, "wait_healthy", lambda: None)
     monkeypatch.setattr(u, "prepare", lambda _: Path("/usr/bin/python3"))
     return u, controls, original
@@ -112,6 +127,62 @@ def test_busy_task_defers_restart(updater):
     finally:
         lease.close()
     assert "Deployed" in u.check()
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"revision": SECOND},
+        {"repository": "different/project"},
+        {"python": "/bootstrap/.venv/bin/python"},
+        {"package": "/bootstrap/src/discord_coding_agent"},
+        {"package": None},
+    ],
+)
+def test_saved_current_cannot_hide_a_different_running_install(updater, monkeypatch, change):
+    u, controls, _ = updater
+    u.data["current"] = FIRST
+    u.save()
+    record = u.running()
+    record["runtime"].update(change)
+    monkeypatch.setattr(u, "running", lambda: record)
+    result = u.check()
+    assert "Already deployed" not in result
+    assert "unverified or different" in result and "No service changed" in result
+    assert not controls and u.data["current"] == FIRST
+
+
+@pytest.mark.parametrize("record", [None, {}, {"runtime": []}])
+def test_saved_current_is_not_live_evidence_for_stopped_or_legacy_process(
+    updater, monkeypatch, record
+):
+    u, controls, _ = updater
+    u.data["current"] = FIRST
+    u.save()
+    monkeypatch.setattr(u, "running", lambda: record)
+    result = u.check()
+    assert "Already deployed" not in result and "unverified" in result
+    assert not controls
+
+
+def test_deploy_status_separates_recorded_and_running_revision(updater, monkeypatch, capsys):
+    from argparse import Namespace
+
+    from discord_coding_agent.cli import deploy_command
+
+    u, controls, _ = updater
+    u.data["current"] = SECOND
+    u.save()
+    monkeypatch.setattr(deployment.Settings, "load", lambda *_: u.settings)
+    monkeypatch.setattr(deployment, "Updater", lambda *_: u)
+    deploy_command(
+        u.config,
+        Namespace(action="status", retry=False, repository=None, directory=None, unit_name=None),
+    )
+    output = capsys.readouterr().out
+    assert f"Recorded current: {SECOND}" in output and f"revision: {FIRST}" in output
+    assert "Running interpreter:" in output and "release match: unverified" in output
+    assert not controls and u.config.token not in output
 
 
 def test_failed_preparation_keeps_old_bot_and_blocks_retry(updater, monkeypatch):

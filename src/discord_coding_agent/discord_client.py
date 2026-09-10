@@ -8,7 +8,7 @@ from typing import Any
 
 import discord
 
-from . import protocol
+from . import protocol, runtime
 from .config import Config
 from .delivery import Delivery
 from .engine import Engine, Origin, Pending
@@ -104,6 +104,7 @@ class BridgeClient(discord.Client):
             intents=intents, allowed_mentions=discord.AllowedMentions.none(), max_messages=128
         )
         self.config = config
+        self.runtime = runtime.current()
         self.store = store
         self.deliveries: dict[int, Delivery] = {}
         self.delivery_started = False
@@ -136,6 +137,7 @@ class BridgeClient(discord.Client):
                     "invocation": os.environ.get("INVOCATION_ID", ""),
                     "config": str(self.config.path),
                     "ready": ready,
+                    "runtime": self.runtime.record(),
                 }
             )
             + "\n",
@@ -210,7 +212,13 @@ class BridgeClient(discord.Client):
         if missing:
             log.error("gateway=permissions_missing permissions=%s", ",".join(missing))
             return
-        log.info("gateway=ready user_id=%s", self.user.id if self.user else None)
+        log.info(
+            "gateway=ready user_id=%s bridge=%s revision=%s replies=%s",
+            self.user.id if self.user else None,
+            self.runtime.version,
+            self.runtime.revision or "unknown",
+            self.runtime.replies,
+        )
         for selected_id in self.workspaces.channels.values():
             if selected_id:
                 self.workspaces.engine(self.workspaces.sessions[selected_id])
@@ -228,7 +236,7 @@ class BridgeClient(discord.Client):
         if not self.ready_once:
             self.ready_once = True
             self.delivery.text(
-                f"{self.config.display_name} connected. Use !ping, then !help. "
+                f"{self.config.display_name} connected. {self.runtime.summary()} Use !ping, then !help. "
                 + (
                     "Previous work was interrupted; review git status/diff before sending a continuation. It was not replayed."
                     if self.engine.state.interrupted

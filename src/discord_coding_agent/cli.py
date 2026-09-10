@@ -280,7 +280,18 @@ def deploy_command(config: Config, args: argparse.Namespace) -> None:
                 f"Repository: {settings.repository}; branch: main; CI: ci.yml push runs\nReleases/backups: {settings.directory}\nTimer: {deployment.unit_names(settings)[1]}; interval {settings.interval:g}s plus jitter"
             )
             print(
-                f"Current: {updater.data['current']}; previous: {updater.data['previous']}; failed: {updater.data['failed']}; interrupted deployment: {bool(updater.data['transaction'])}"
+                f"Recorded current: {updater.data['current']}; previous: {updater.data['previous']}; failed: {updater.data['failed']}; interrupted deployment: {bool(updater.data['transaction'])}"
+            )
+            ready = updater.running()
+            print(updater.running_summary(ready))
+            current = updater.data["current"]
+            print(
+                "Recorded/current running release match: "
+                + (
+                    "verified"
+                    if current and updater.matches_release(ready, current)
+                    else "unverified"
+                )
             )
         else:
             print(updater.check(retry=args.retry, rollback=args.action == "rollback"))

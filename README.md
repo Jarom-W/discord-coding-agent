@@ -41,7 +41,7 @@ Follow [systemd installation](docs/service.md) to keep the bot running after log
 
 ## Everyday use
 
-All replies appear inline in chat, including long results and code, split into readable pages without file downloads. `!help` lists the commands. `!status` reports task state and last observed activity. `!stop` interrupts work; it does not undo edits or external effects. `!last` retrieves the saved result. Busy messages are explicitly rejected as **not submitted**.
+All replies appear inline in chat, including long results and code, split into readable pages without file downloads. `!help` lists the commands. `!ping` and `!status` identify the running bridge version and reply format; `!status` also reports task state and last observed activity. If new replies still arrive as files, [verify the running installation](docs/deployment.md#verify-the-running-bot). `!stop` interrupts work; it does not undo edits or external effects. `!last` retrieves the saved result. Busy messages are explicitly rejected as **not submitted**.
 
 Tasks have **no bridge time limit by default**. Use `!run 30m Fix the failing tests` for an enforced cap, or `!run unlimited …` to remove the deadline for one task. Codex still stops when it finishes or fails; approval, connection and usage limits still apply. See the [command and timeout reference](docs/reference.md).
 
