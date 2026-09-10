@@ -1,5 +1,13 @@
 # Release notes
 
+## 0.2.5 — 2026-09-10
+
+Fixed readiness remaining false after a successful Discord Gateway resume. The bridge previously cleared readiness on disconnect but only restored it on `READY`; discord.py dispatches `RESUMED` when an existing session reconnects successfully. A bot could therefore respond in Discord while CD refused to update it. Both events now share channel validation, connection-state restoration and pending-delivery recovery. Active tasks/approvals survive the reconnect, submitted coding work is not replayed, and late Gateway events cannot restore readiness during shutdown.
+
+Updater logs now distinguish an actual readiness result from completion of the systemd query. Runtime protocol/state/dependencies remain unchanged. The bot fix arrives through normal deployment; the extra updater log requires updating its separate bootstrap installation. See [recovery instructions](docs/troubleshooting.md#service-active-but-updater-not-ready) and [test scope](docs/compatibility.md).
+
+For releases through 0.2.4, an idle restart rebuilds readiness so CD can attempt the fixed release. Wait for active work to complete, restart only the managed bridge, confirm `!ping`, then run `deploy check --retry`. No manual readiness-file edits, state deletion or Codex reinstall are required. The generic not-ready message can also indicate a real permission/configuration/network problem; inspect the bot journal if restart does not restore readiness.
+
 ## 0.2.4 — 2026-09-10
 
 Added the running bridge version, managed release revision when available, and inline-only reply format to `!ping`, `!status`, startup messages and the private readiness record. Identity is captured from the loaded package and its prepared release; a bootstrap checkout's HEAD is not represented as running code. Existing inline chunking remains the only output path, including saved replies recovered with `!last`.

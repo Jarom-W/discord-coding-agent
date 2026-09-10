@@ -23,6 +23,7 @@ journalctl --user -u discord-coding-agent.service -n 200 --no-pager -o short-iso
 | Busy in another channel | `!status` reports the active coding channel. Work is serialized across the bot; the rejected message was not submitted. Wait, or `!stop` from a bound channel. Selection changes also wait during deployment. |
 | Old saved repository identity | Restore its original Git directory or deliberately start a new session with `!repo --fresh PATH`. Old history is preserved and never silently rebound to replacement files. |
 | Update does not arrive / failed deployment | Check `deploy status`, main's exact `ci.yml` push run, timer/user-bus/linger, bot readiness and updater journal. See [deployment troubleshooting](deployment.md). PR success alone is insufficient; active tasks defer restarts. |
+| Service is active, but updater says “Bot is not ready” | `ActiveState=active` means the process runs; `health-status complete` only means the systemd query completed. Neither verifies Gateway readiness. A disconnected, unvalidated or stale process record blocks CD. See [readiness recovery](#service-active-but-updater-not-ready), including reconnect recovery. |
 | Invalid token | Reset the bot token, update private config locally, restart. Do not send old or new tokens to an issue. |
 | `PrivilegedIntentsRequired` | Enable and save Message Content Intent on the token's application. Do not enable member/presence intents. |
 | Bot invisible or cannot send replies | Grant View Channels, Send Messages and Read Message History on that channel/category. Fix access, then use `!last` to recover saved output. Attach Files is not required. |
@@ -45,6 +46,34 @@ journalctl --user -u discord-coding-agent.service -n 200 --no-pager -o short-iso
 | Expired/old buttons | Use `!status` and the current request ID. Old buttons cannot decide a different request, even after restart. If Discord was disconnected they may remain visible until cleanup; do not reuse their IDs. |
 | Undelivered complete result | Fix Discord connectivity/permissions, reconnect, or `!last`. Delivery retries are bounded and may need this explicit recovery. No model task is repeated. |
 | Empty thread cannot resume (`no rollout found`) | Codex has no persisted history for that thread, often because initialization succeeded but no turn/history was written. Inspect first; when appropriate choose `!new`. Do not silently recreate/replay the uncertain task. |
+
+## Service active but updater not ready
+
+The updater checks both systemd process identity and the bridge's private readiness record. It stops before preparing/installing a candidate when the Gateway is not ready, its primary channel fails validation, or PID/invocation/configuration do not match. Enabling the timer or retrying a revision does not bypass this check. `deployment readiness=ready` or `not_ready` reports the actual outcome; the earlier `health-status ... complete` log describes only the systemd query.
+
+Discord can recover a dropped connection by [resuming its existing Gateway session](https://docs.discord.com/developers/events/gateway#resuming). That finishes with `RESUMED`, which is distinct from initial `READY`. The bridge handles both events, revalidates the primary channel and restores readiness, connection status and pending delivery. Coding work is not submitted again, active approvals retain their identities, and the activity lock still defers deployment until work is idle. Look for `gateway=ready source_event=resumed` after a disconnect.
+
+For an active process whose readiness remains false:
+
+1. **In Discord:** inspect `!status`. Wait for active coding work to finish, or deliberately use `!stop` and review its effects before restarting.
+2. **On the Pi:** collect the bot journal, then restart only your managed bridge:
+
+   ```bash
+   journalctl --user -u discord-coding-agent.service -n 80 --no-pager -o short-iso
+   systemctl --user restart discord-coding-agent.service
+   ```
+
+3. **In Discord:** wait for the connection message and confirm `!ping` responds. A new connection rebuilds the readiness record; do not edit `ready.json` or remove a live lock to force a pass.
+4. **On the Pi:** attempt deployment and inspect the configured interpreter without a pager:
+
+   ```bash
+   "$HOME/services/discord-coding-agent/.venv/bin/discord-coding-agent" deploy check --retry
+   systemctl --user show discord-coding-agent.service --no-pager -p ActiveState -p MainPID -p ExecStart
+   ```
+
+Use your own unit/install path for a custom instance. The absolute CLI path also works after a new SSH login lands in `~`; `.venv/bin/...` is relative to your current directory. An SSH connection reset is evidence of a dropped SSH connection, not proof that the Discord Gateway disconnected. Use the bot journal to establish that sequence.
+
+If readiness still fails, inspect `gateway=configuration_error` / `permissions_missing`, primary channel access, network connectivity and the service's configuration path. Preserve the logs and use the [manual update procedure](service.md#update-without-losing-credentials-or-conversation) if an older bot cannot become eligible for CD. A successful ping tests message round-trip delivery; the updater also validates the configured primary channel and process identity. Do not assume a fresh conversation or reinstalling Codex will repair readiness.
 
 ## Slow conversation startup
 
