@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import discord
+import pytest
 
 from discord_coding_agent.delivery import Delivery
 from discord_coding_agent.discord_client import BridgeClient, DiscordTransport
@@ -110,6 +111,7 @@ async def test_ready_record_tracks_validated_gateway_and_disconnect(config, tmp_
     await client.on_ready()
     assert json.loads(path.read_text())["ready"] is True
     assert json.loads(path.read_text())["invocation"] == "test-invocation"
+    assert json.loads(path.read_text())["runtime"] == client.runtime.record()
     await client.on_disconnect()
     assert json.loads(path.read_text())["ready"] is False
     await client.close()
@@ -177,5 +179,76 @@ async def test_help_is_inline_complete_unicode_without_model_or_mentions(config,
             wire = discord.utils._to_json({"content": call.args[0]})
             assert json.loads(wire.encode("utf-8"))["content"] == call.args[0]
         assert client.workspaces.active() is None and client.engine.rpc is None
+    finally:
+        await client.close()
+
+
+@pytest.mark.parametrize("channel_id", [33, 44])
+@pytest.mark.parametrize("command", ["!ping", "!status"])
+async def test_runtime_diagnostics_are_inline_without_model_in_any_channel(
+    config, tmp_path, channel_id, command
+):
+    client = BridgeClient(config, StateStore(tmp_path / "adapter-state", "identity", "manual"))
+    guild = SimpleNamespace(id=22, me=object())
+    channel = MagicMock(spec=discord.TextChannel)
+    channel.guild, channel.id, channel.type = guild, channel_id, discord.ChannelType.text
+    channel.permissions_for.return_value = discord.Permissions(
+        view_channel=True, send_messages=True, read_message_history=True
+    )
+    channel.send = AsyncMock(return_value=SimpleNamespace(id=900))
+    client.get_channel = lambda _: channel
+    client.wait_until_ready = AsyncMock()
+    delivery = client.channel_delivery(channel_id)
+    delivery.transport.find = AsyncMock(return_value=None)
+    delivery.start()
+    try:
+        await client.on_message(
+            SimpleNamespace(
+                author=SimpleNamespace(bot=False, id=11),
+                guild=guild,
+                channel=channel,
+                id=999,
+                content=command,
+                attachments=[],
+                stickers=[],
+            )
+        )
+        await delivery.queue.join()
+        sent = "\n".join(call.args[0] for call in channel.send.await_args_list)
+        assert client.runtime.summary() in sent
+        assert "inline-text (no file uploads)" in sent
+        assert all(
+            "file" not in call.kwargs and "files" not in call.kwargs
+            for call in channel.send.await_args_list
+        )
+        assert client.engine.rpc is None and client.workspaces.active() is None
+    finally:
+        await client.close()
+
+
+async def test_saved_legacy_result_is_recovered_inline_after_restart(config, tmp_path):
+    store = StateStore(tmp_path / "adapter-state", "identity", "manual")
+    content = "Saved output — café 中文 😀 @everyone\n" * 1000
+    state = store.load()
+    state.last_result, state.delivered, state.result_id = content, True, "legacy-result"
+    store.save(state)
+    client = BridgeClient(config, store)
+    channel = SimpleNamespace(send=AsyncMock(return_value=SimpleNamespace(id=9)))
+    transport = client.delivery.transport
+    transport.channel = AsyncMock(return_value=channel)
+    transport.find = AsyncMock(return_value=None)
+    client.delivery.start()
+    try:
+        from discord_coding_agent.engine import Origin
+
+        await client.workspaces.message(Origin(11, 22, 33, 999), "!last")
+        await client.delivery.queue.join()
+        calls = channel.send.await_args_list
+        assert len(calls) > 8
+        assert "".join(call.args[0].rpartition("\n")[0] for call in calls) == (
+            "Session: main\n" + content
+        )
+        assert all("file" not in call.kwargs and "files" not in call.kwargs for call in calls)
+        assert client.engine.rpc is None
     finally:
         await client.close()

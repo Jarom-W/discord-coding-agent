@@ -109,6 +109,34 @@ Auto-deployment updates the bot's versioned release, not the bootstrap updater i
 
 ## Acceptance and troubleshooting
 
+### Verify the running bot
+
+**In Discord:** send `!ping`. The current bridge reports `Bridge: VERSION; revision: COMMIT; replies: inline-text (no file uploads)`. `!status` includes the same identity even before binding a repository. A manual/bootstrap install reports the installed version and an unavailable revision; it does not guess from the checkout's current HEAD. The startup message also identifies the running release. A reply without these fields means this diagnostic change is not running in that process.
+
+Every text page sent by the current bridge ends with `[dca:ID:inline:PAGE]`. A freshly posted attachment with a marker such as `[dca:ID:1/1]` came from an older delivery path. Check its timestamp and author: updating the bot does not convert existing attachments. A link written in the model's text is also different from a file uploaded by the bridge; include the short caption/marker in a bug report without sharing the file's private contents.
+
+**On the Pi:** these checks are read-only; use your configured unit name if different:
+
+```bash
+cd "$HOME/services/discord-coding-agent"
+.venv/bin/discord-coding-agent deploy status
+systemctl --user show discord-coding-agent.service -p MainPID -p ExecStart -p FragmentPath
+systemctl --user list-timers discord-coding-agent-update.timer --no-pager
+journalctl --user -u discord-coding-agent-update.service -n 80 --no-pager -o short-iso
+```
+
+Current `deploy status` separates **Recorded current** from the **Running** version/revision/interpreter/package. It validates the live record against the systemd PID, invocation and configuration. Only a matching managed release is marked verified; a stopped bot, an old readiness record, a manual install or a legacy process without identity metadata is unverified. Likewise `deploy check` no longer says “Already deployed” from saved history alone. An unverified match causes no automatic service replacement. This is local installation identification, not tamper-proof attestation or a model/tool behavior check.
+
+`ExecStart` should point into `directory/releases/COMMIT/.venv/bin/python` for a CD-managed release. A path into your bootstrap checkout means that copy is configured instead. `git log`, the bootstrap CLI's `--version`, and `deployment.json` do not establish which code an existing bot process loaded. Running `service install` from the bootstrap checkout after CD can repoint the unit; do that only deliberately. **The updater itself stays in the bootstrap venv:** install this release there using the [bootstrap update procedure](#settings-and-storage) to get the improved local deployment checks. Updating only the bot does not update the updater's CLI.
+
+If the running commit is behind main, check the timer journal for pending main CI, busy work, a blocked failed candidate or rollback. After fixing the reported cause, `deploy check --retry` deliberately retries a failed revision while respecting the idle lock. An incomplete candidate must first be inspected and moved aside with a private backup, as described above; do not delete a running release or state to force a retry.
+
+If the saved revision matches main but the unit points elsewhere, choose an idle maintenance window, disable the update timer and wait for any check to finish. Preserve the current unit/config/state as in the [service recovery guide](service.md#update-without-losing-credentials-or-conversation). Either deliberately reinstall the current bootstrap as your bot following that guide, or restore the existing verified release's unit using that release's `.venv/bin/discord-coding-agent service validate` and `service install`, then restart your managed service. Check `ExecStart` and `!ping` before re-enabling the timer. A bootstrap install reports an unavailable managed revision; its installed version and inline replies can still be checked. Do not edit deployment state to manufacture a match or stop an unrelated personal installation.
+
+After the inline release is running, use **`!last` in the affected channel** to recover the selected session's saved result as new chat pages. It does not rerun the coding task or edit historical messages. No attachment permission is required for these pages.
+
+### Other deployment failures
+
 In a disposable/test instance, merge a harmless change into your configured fork, wait for main CI, run `deploy check`, and compare `deploy status` with that main SHA. Confirm `!ping`, session continuity and a read-only task. Repeat with an active task: the updater should prepare/defer and leave the task running. Test failed readiness/rollback only in that disposable instance. The automated suite simulates these outcomes and validates units; it does not prove live Pi systemd/Gateway operation.
 
 - **No update:** inspect main's `push` CI, the configured public repository, timer state, user bus/linger, and `deploy status`. Failed/skipped/pending CI or active coding work defers deployment.

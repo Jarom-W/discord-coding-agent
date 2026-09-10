@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 
-from . import protocol
+from . import protocol, runtime
 from .config import Config, discover_codex, repository_identity
 from .errors import BridgeError, LimitError, log_error
 from .locks import Lease
@@ -23,8 +23,8 @@ log = logging.getLogger(__name__)
 
 HELP = """Ordinary text starts/continues the saved Codex conversation. One active task; busy messages are NOT submitted.
 !help — commands and limitations
-!ping — Discord connection test; no model
-!status — operational state, thread, mode, elapsed, last observed activity, pending requests
+!ping — Discord connection test and running bridge version/reply format; no model
+!status — running release, operational state, thread, mode, elapsed, last observed activity, pending requests
 !run 30m task text — submit one task with a time limit (s/m/h, e.g. 90s or 1.5h); !run unlimited task text removes the task limit for that task
 !new [auto|manual] — fresh conversation; current mode if omitted; idle only
 !approvals — selected mode and verification scope
@@ -226,6 +226,7 @@ class Engine:
         elif cmd == "!ping":
             self.sink.text(
                 f"{self.config.display_name}: pong — Discord receive/send works; no model invoked."
+                f"\n{runtime.current().summary()}"
             )
         elif cmd == "!status":
             self.sink.text(self.status())
@@ -306,6 +307,7 @@ class Engine:
         elapsed = f"{duration:.1f}s" if duration is not None else "n/a"
         age = f"{now - self.last_event_at:.1f}s ago" if self.last_event_at else "n/a"
         return (
+            f"{runtime.current().summary()}\n"
             f"State: {self.phase if self.connected else 'disconnected'}; task phase: {self.phase}; Gateway: {'connected' if self.connected else 'disconnected'}\n"
             f"Thread: {self.state.thread_id or 'not created'}; mode: {self.state.mode}; verified: {self.verified}\n"
             f"Elapsed: {elapsed}; last observed activity: {self.last_event} ({age})\n"

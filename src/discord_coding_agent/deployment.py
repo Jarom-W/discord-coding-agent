@@ -349,7 +349,8 @@ class Updater:
             raise BridgeError("Bot unit does not match this configuration; refusing deployment.")
         return path
 
-    def healthy(self) -> bool:
+    def running(self) -> dict[str, Any] | None:
+        """Read a Gateway-ready process record, bound to the current systemd invocation."""
         value = run(
             [
                 "systemctl",
@@ -365,12 +366,14 @@ class Updater:
         fields = dict(line.split("=", 1) for line in value.splitlines() if "=" in line)
         ready_path = self.config.state_dir / "ready.json"
         if not ready_path.exists():
-            return False
+            return None
         private_file(ready_path)
         try:
-            ready = json.loads(ready_path.read_text())
-            return (
-                fields.get("ActiveState") == "active"
+            with ready_path.open() as stream:
+                ready = json.loads(stream.read(16384))
+            if (
+                isinstance(ready, dict)
+                and fields.get("ActiveState") == "active"
                 and fields.get("MainPID") not in {None, "0"}
                 and bool(fields.get("InvocationID"))
                 and ready.get("protocol") == 1
@@ -378,9 +381,49 @@ class Updater:
                 and str(ready.get("pid")) == fields.get("MainPID")
                 and ready.get("invocation") == fields.get("InvocationID")
                 and ready.get("config") == str(self.config.path)
-            )
+            ):
+                return ready
         except (ValueError, AttributeError):
+            pass
+        return None
+
+    def healthy(self) -> bool:
+        # Protocol 1 bots without release metadata still cooperate with safe idle updates.
+        return self.running() is not None
+
+    def matches_release(self, ready: dict[str, Any] | None, sha: str) -> bool:
+        if ready is None or not isinstance(ready.get("runtime"), dict):
             return False
+        identity = ready["runtime"]
+        prefix = self.settings.directory / "releases" / sha / ".venv"
+        return (
+            identity.get("revision") == sha
+            and identity.get("repository") == self.settings.repository
+            and identity.get("python") == str(prefix / "bin/python")
+            and isinstance(identity.get("package"), str)
+            and Path(identity["package"]).is_relative_to(prefix.resolve())
+        )
+
+    @staticmethod
+    def running_summary(ready: dict[str, Any] | None) -> str:
+        if ready is None:
+            return "Running release: unverified; no Gateway-ready record matching the service PID/invocation. Inspect service status and the bot journal."
+        identity = ready.get("runtime")
+        if not isinstance(identity, dict):
+            return "Running release: unverified; this process reports legacy readiness without version/reply-format metadata. Inspect ExecStart and !ping; update the installed bot while idle."
+
+        def field(name: str) -> str:
+            value = identity.get(name)
+            return (
+                value
+                if isinstance(value, str) and value and len(value) <= 1024 and value.isprintable()
+                else "unavailable"
+            )
+
+        return (
+            f"Running bridge: {field('version')}; revision: {field('revision')}; replies: {field('replies')}\n"
+            f"Running interpreter: {field('python')}\nRunning package: {field('package')}"
+        )
 
     def wait_healthy(self) -> None:
         started = time.monotonic()
@@ -580,7 +623,14 @@ class Updater:
                 return "Previous bot restored. Disable the update timer to stay pinned."
             sha = self.github.head()
             if sha == self.data["current"]:
-                return f"Already deployed {sha[:12]}."
+                ready = self.running()
+                if self.matches_release(ready, sha):
+                    return f"Already deployed {sha[:12]}; running release matches the service PID/invocation."
+                return (
+                    f"Recorded deployment is {sha[:12]}, but the running release is unverified or different. "
+                    f"No service changed.\n{self.running_summary(ready)}\n"
+                    "See docs/deployment.md#verify-the-running-bot; saved deployment history alone does not prove which code is running."
+                )
             if sha == self.data["failed"] and not retry:
                 return f"Revision {sha[:12]} previously failed; waiting for a new main commit or deploy check --retry."
             if not self.github.passed(sha):

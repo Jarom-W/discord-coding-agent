@@ -1,5 +1,13 @@
 # Release notes
 
+## 0.2.4 — 2026-09-10
+
+Added the running bridge version, managed release revision when available, and inline-only reply format to `!ping`, `!status`, startup messages and the private readiness record. Identity is captured from the loaded package and its prepared release; a bootstrap checkout's HEAD is not represented as running code. Existing inline chunking remains the only output path, including saved replies recovered with `!last`.
+
+Fixed a misleading deployment check: a saved current SHA no longer produces “Already deployed” when the live service reports a different/unknown release. Deployment status distinguishes recorded history from the running package and checks PID/invocation identity. A mismatch is reported without stopping or replacing a service. Legacy protocol-1 bots remain eligible for normal safe updates, but cannot verify their running revision without the new metadata.
+
+The updater runs from its separate bootstrap installation, so update that installation explicitly for the new local deployment diagnostics. No schema/dependency/Codex-baseline change is required; readiness metadata is additive. See [running-installation recovery](docs/deployment.md#verify-the-running-bot) and [validation scope](docs/compatibility.md). This change does not establish which installation sent a particular live attachment without its runtime evidence.
+
 ## 0.2.3 — 2026-09-10
 
 Fixed a premature timeout during `thread/start`, `thread/resume` and preparation-time `config/read`: they now use the initialization budget (120 seconds by default), with one outer deadline covering all preparation. They no longer inherit the ordinary 45-second RPC limit. Later `turn/start` acknowledgements still use `request`; explicit task deadlines and `!stop` remain effective during startup. No prompt is replayed and saved sessions/results are retained after failure.

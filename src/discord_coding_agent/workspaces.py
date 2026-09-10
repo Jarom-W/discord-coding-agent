@@ -12,6 +12,7 @@ from collections.abc import Callable
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 
+from . import runtime
 from .config import Config, outside, private_file, repository_identity
 from .engine import HELP, Engine, Origin, Pending, Sink
 from .errors import BridgeError
@@ -472,10 +473,12 @@ class Workspaces:
                 if cmd == "!ping" and not argument:
                     sink.text(
                         f"{self.config.display_name}: pong — Discord receive/send works; no model invoked."
+                        f"\n{runtime.current().summary()}"
                     )
                 elif not selected:
                     sink.text(
-                        "This channel has no repository/session yet. Use !dirs, then !repo PATH. Only the configured owner can bind channels in this server."
+                        (runtime.current().summary() + "\n" if cmd == "!status" else "")
+                        + "This channel has no repository/session yet. Use !dirs, then !repo PATH. Only the configured owner can bind channels in this server."
                     )
                 else:
                     engine = self.engine(selected)
