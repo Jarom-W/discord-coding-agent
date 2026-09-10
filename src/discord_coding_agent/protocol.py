@@ -81,7 +81,7 @@ async def initialize(rpc: Rpc) -> None:
             "clientInfo": {
                 "name": "discord_coding_agent",
                 "title": "Discord Coding Agent (community)",
-                "version": "0.2.2",
+                "version": "0.2.3",
             },
             "capabilities": {"experimentalApi": True, "optOutNotificationMethods": OPT_OUT},
         },
@@ -91,7 +91,9 @@ async def initialize(rpc: Rpc) -> None:
 
 
 async def verify_process(rpc: Rpc, repo: Path, mode: str) -> None:
-    response = await rpc.call("config/read", {"cwd": str(repo), "includeLayers": False})
+    response = await rpc.call(
+        "config/read", {"cwd": str(repo), "includeLayers": False}, rpc.timeouts.initialization
+    )
     config = response.get("config", {})
     expected = {
         "approval_policy": "on-request",

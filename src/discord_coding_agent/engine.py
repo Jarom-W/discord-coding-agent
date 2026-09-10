@@ -110,6 +110,7 @@ class Engine:
         self.task_limit = config.timeouts.task
         self.last_event = "none"
         self.last_event_at: float | None = None
+        self.preparation_step = "not started"
         self.pending: dict[str, Pending] = {}
         self.items: dict[str, Json] = {}
         self.messages: dict[str, str] = {}
@@ -193,6 +194,7 @@ class Engine:
         self.elapsed = None
         self.task_limit = task_limit
         self.verified = False
+        self.preparation_step = "not started"
         self.state.active = {
             "task_id": self.task_id,
             "message_id": origin.message,
@@ -308,11 +310,18 @@ class Engine:
             f"Thread: {self.state.thread_id or 'not created'}; mode: {self.state.mode}; verified: {self.verified}\n"
             f"Elapsed: {elapsed}; last observed activity: {self.last_event} ({age})\n"
             f"Pending: {', '.join(self.pending) or 'none'}; interrupted: {self.state.interrupted}; last result delivered: {self.state.delivered}\n"
+            f"Preparation step: {self.preparation_step}; initialization budget: {self.config.timeouts.initialization:g}s; ordinary RPC limit: {self.config.timeouts.request:g}s\n"
             f"{getattr(self.sink, 'status', '')}\n"
             f"{'Active' if self.busy else 'Default'} task limit: {describe_task_limit(self.task_limit if self.busy else self.config.timeouts.task)}. Quiet logs/typing are not proof a task is stuck."
         )
 
+    def preparing(self, step: str) -> None:
+        self.preparation_step = step
+        self.last_event, self.last_event_at = f"preparation/{step}", time.monotonic()
+        log.info("task=%s preparation=%s", self.task_id, step)
+
     async def _prepare(self) -> None:
+        self.preparing("repository validation")
         if not any(self.config.repo.is_relative_to(root) for root in self.config.roots):
             raise BridgeError(
                 "This saved repository is outside WORKSPACE_ROOTS. Select an allowed repository with !repo or update the roots locally."
@@ -323,20 +332,30 @@ class Engine:
                 "Repository identity changed; this session was not resumed. Inspect the repository and workspace recovery guide."
             )
         executable = discover_codex(self.config.codex)
+        self.preparing("Codex version check")
         await protocol.version(executable, self.config.timeouts.initialization)
         rpc = self.rpc_factory(self.config.timeouts, self.event, self.request, self.disconnected)
         self.rpc = rpc
+        self.preparing("Codex process start")
         await rpc.start(
             protocol.argv(executable, self.state.mode),
             self.config.repo,
             protocol.child_environment(),
         )
+        self.preparing("initialize")
         await protocol.initialize(rpc)
+        self.preparing("config/read")
         await protocol.verify_process(rpc, self.config.repo, self.state.mode)
         method = "thread/resume" if self.state.thread_id else "thread/start"
+        self.preparing(method)
         response = await rpc.call(
-            method, protocol.thread_params(self.config.repo, self.state.mode, self.state.thread_id)
+            method,
+            protocol.thread_params(self.config.repo, self.state.mode, self.state.thread_id),
+            # Thread loading is preparation, not an ordinary 45-second RPC. The
+            # outer initialization timer bounds ALL preparation stages together.
+            self.config.timeouts.initialization,
         )
+        self.preparing("thread verification")
         thread_id = protocol.verify_thread(response, self.config.repo, self.state.mode)
         if self.state.thread_id and thread_id != self.state.thread_id:
             raise BridgeError(
@@ -345,6 +364,7 @@ class Engine:
         self.state.thread_id = thread_id
         self.verified = True
         self.save()
+        self.preparing("complete")
 
     async def _run(self, prompt: str) -> None:
         try:
@@ -369,6 +389,12 @@ class Engine:
                             "initialization",
                             time.monotonic() - init_started,
                             self.config.timeouts.initialization,
+                            diagnostic=(
+                                f"Preparation step: {self.preparation_step}. This task's prompt was not submitted to Codex. "
+                                "Run doctor --probe and inspect the journal for that step; doctor does not resume this session. "
+                                "If startup needs longer, adjust [timeouts] initialization and restart while idle. "
+                                "No work was replayed."
+                            ),
                         ) from exc
                     assert self.rpc
                     self.transition("running")

@@ -10,10 +10,12 @@ class BridgeError(Exception):
 
 
 class LimitError(BridgeError):
-    def __init__(self, operation: str, elapsed: float, limit: float) -> None:
+    def __init__(
+        self, operation: str, elapsed: float, limit: float, *, diagnostic: str | None = None
+    ) -> None:
         super().__init__(
             f"{operation} timed out after {elapsed:.1f}s (configured limit {limit:g}s). "
-            "Run doctor and inspect journal timestamps; work was not replayed."
+            + (diagnostic or "Run doctor and inspect journal timestamps; work was not replayed.")
         )
         self.operation = operation
         self.elapsed = elapsed

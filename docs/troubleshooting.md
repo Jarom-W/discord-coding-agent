@@ -9,7 +9,7 @@ Start with `!ping`, `!status`, and `!last` in the configured channel. On the Pi,
 journalctl --user -u discord-coding-agent.service -n 200 --no-pager -o short-iso
 ```
 
-`doctor` shows versions, platform, configured paths and capability failures without tokens. `--probe` creates its own Codex child for non-model handshake/config/account-presence checks; it does not load or run the bridge's conversation. `--discord` tests REST token/channel access, not Gateway intents or send permissions. Connection-only `!ping` tests receive/send. No production credentials belong in CI.
+`doctor` shows versions, platform, configured paths, timeout values and capability failures without tokens. `--probe` creates its own Codex child for non-model handshake/config/account-presence checks; it does not load or run the bridge's conversation. `--discord` tests REST token/channel access, not Gateway intents or send permissions. Connection-only `!ping` tests receive/send. No production credentials belong in CI.
 
 ## Symptoms and next steps
 
@@ -32,6 +32,7 @@ journalctl --user -u discord-coding-agent.service -n 200 --no-pager -o short-iso
 | Typing indicator disappears or fails | Cosmetic HTTP errors are isolated. Use last observed activity and task phase; typing is not proof of progress. |
 | Quiet logs | No idle-read timeout is imposed. A long tool/model call may be quiet. Inspect event age, Pi resources and explicit deadline; use `!stop` if you decide to interrupt. |
 | Timeout | Read the named operation and actual seconds. Initialization, RPC, partial transport frame, whole task, human wait, delivery and shutdown are different limits. See [reference](reference.md). Adjust the right TOML field and restart while idle. A request timeout may follow completed edits: never blindly resend. |
+| Thread start/resume times out despite an unlimited task | `!run unlimited` does not disable startup checks. Inspect the preparation step and initialization budget in `!status`; see [slow conversation startup](#slow-conversation-startup) below. |
 | Still stops after one hour | Check `!status` and the private `[timeouts]` table. Set an explicit `task = 3600` to `task = 0` and restart while idle. `!run unlimited task text` overrides the default for one new task. Codex can still complete/fail earlier; this does not override account limits. |
 | Authentication error | Run the same configured executable's `login status` as the service user. Complete headless login locally; confirm service HOME/Codex authentication location and managed account requirements. Do not copy caches into Discord. |
 | Rate/usage limit | Check your Codex/account usage and service status through official account tools. Wait or adjust workload/auth plan as appropriate. Subscription coverage and limits are not guaranteed. The bridge does not loop-replay a failed turn. |
@@ -44,6 +45,17 @@ journalctl --user -u discord-coding-agent.service -n 200 --no-pager -o short-iso
 | Expired/old buttons | Use `!status` and the current request ID. Old buttons cannot decide a different request, even after restart. If Discord was disconnected they may remain visible until cleanup; do not reuse their IDs. |
 | Undelivered complete result | Fix Discord connectivity/permissions, reconnect, or `!last`. Delivery retries are bounded and may need this explicit recovery. No model task is repeated. |
 | Empty thread cannot resume (`no rollout found`) | Codex has no persisted history for that thread, often because initialization succeeded but no turn/history was written. Inspect first; when appropriate choose `!new`. Do not silently recreate/replay the uncertain task. |
+
+## Slow conversation startup
+
+Codex [resumes a stored thread before a later `turn/start` submits new input](https://developers.openai.com/codex/app-server). A simple question can therefore fail during conversation loading, before Codex sees it. The bridge’s initialization budget covers this loading alongside the other preparation steps. A timeout alone does not establish whether the delay came from history loading, host resources, network access or configured integrations.
+
+1. **In Discord:** read `!status` and record the session/thread, preparation step, timeout type/limit and task ID. Keep that session selected; a new conversation is not required merely to increase its startup budget.
+2. **On the Pi:** collect the journal and `doctor --probe` output using the commands at the top of this guide. A successful probe checks handshake/config/account access; it does **not** resume the selected conversation or prove that its tools can start.
+3. If startup is progressing but needs more time, edit **the existing `[timeouts]` table** in private config, for example `initialization = 180`, then restart while idle. The full-task setting can stay `task = 0`; ordinary request timeouts remain separate. A larger budget will not repair a permanently stalled process or unavailable dependency.
+4. After resolving the cause, send an explicit continuation. No failed prompt is automatically replayed. If the failed operation was `turn/start`, the prompt may already have been accepted: inspect repository status/diffs and any external effects first.
+
+If a running bot still reports `RPC thread/resume ... configured limit 45s` rather than an initialization-budget failure, verify the deployed commit with `deploy status` and install the current fix. Consult the [release notes](../CHANGELOG.md) for the temporary workaround on affected releases. Never publish raw Codex logs, authentication caches, private state or full prompts while collecting evidence.
 
 ## Interrupted-task recovery
 

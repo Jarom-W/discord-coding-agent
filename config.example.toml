@@ -11,8 +11,8 @@ APPROVAL_MODE = "manual" # Initial mode; saved state takes precedence thereafter
 # STATE_DIR = "/absolute/path/outside/repositories/bridge-state"
 
 [timeouts]
-initialization = 120 # Total preparation: version, process, handshake, config, thread
-request = 45         # One RPC response, not a full coding task
+initialization = 120 # Shared preparation budget: version, process, handshake, config, thread start/resume
+request = 45         # One ordinary RPC response, e.g. turn/start; preparation uses initialization
 transport = 20       # Partial protocol frame / pipe drain; no timeout for idle stdout
 task = 0            # No whole-task deadline; positive seconds include initialization/human wait
 user_wait = 900      # Each pending approval or question; expires without granting approval

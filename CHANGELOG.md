@@ -1,5 +1,15 @@
 # Release notes
 
+## 0.2.3 — 2026-09-10
+
+Fixed a premature timeout during `thread/start`, `thread/resume` and preparation-time `config/read`: they now use the initialization budget (120 seconds by default), with one outer deadline covering all preparation. They no longer inherit the ordinary 45-second RPC limit. Later `turn/start` acknowledgements still use `request`; explicit task deadlines and `!stop` remain effective during startup. No prompt is replayed and saved sessions/results are retained after failure.
+
+Status and logs identify the preparation step, and doctor displays configured timeouts. Initialization deadline errors distinguish an unsubmitted prompt from an uncertain turn submission and point to the appropriate setting and diagnostics. This fixes the bridge’s early cutoff; it does not identify or guarantee a remedy for a particular host’s underlying Codex delay.
+
+For affected releases through 0.2.2, increasing `initialization` alone does not remove the nested `request` cutoff. A temporary workaround is to set both values to 180 in the existing private `[timeouts]` table, then restart while idle; that also lengthens ordinary RPC waits. After installing this fix, `request = 45` can be restored independently. Do not add another `[timeouts]` table or disable transport/sandbox checks. See [startup troubleshooting](docs/troubleshooting.md#slow-conversation-startup).
+
+No state/config schema, dependency, Codex compatibility baseline or updater protocol changes. See [validation scope](docs/compatibility.md).
+
 ## 0.2.2 — 2026-09-10
 
 All bot replies now appear inline in Discord, including long coding results, approval details, directory/session listings and `!last`. Removed the text-file fallback and help-only page cap. Pagination preserves Unicode and source text, splits at line/word boundaries, and closes/reopens ordinary fenced code blocks across pages. Attach Files is no longer a required bot permission.
