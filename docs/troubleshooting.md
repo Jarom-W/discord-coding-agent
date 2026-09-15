@@ -121,6 +121,8 @@ cat /proc/pressure/io
 sudo journalctl -k --since "1 hour ago" -p warning --no-pager -n 60
 ```
 
+If `/proc/pressure/io` is missing, skip that optional metric; the running kernel may not provide pressure accounting. If the journal query stalls, `sudo dmesg --level=emerg,alert,crit,err,warn --ctime | tail -n 60` reads recent warnings from the kernel ring buffer. `findmnt -no SOURCE,FSTYPE /` identifies the root device, and `ps -eo pid,stat,wchan:32,comm` shows where blocked processes are waiting.
+
 A `D` process state is an uninterruptible wait; it can indicate I/O blocking and is not by itself proof of a failed disk. Check the kernel warnings for storage errors and [I/O pressure measurements](https://docs.kernel.org/accounting/psi.html) for ongoing stalls. A low `free` memory column is not an out-of-memory diagnosis: also read `available`; occupied swap alone does not prove current swap activity. If `apt`/`dpkg` is running, let it finish and inspect its progress instead of killing it, deleting package locks or rebooting during the operation. Recheck Codex startup after the host settles; preserve evidence if the wait persists.
 
 ## Interrupted-task recovery
