@@ -1,5 +1,13 @@
 # Release notes
 
+## 0.3.1 — 2026-09-15
+
+Task failures are now saved before Discord delivery and shown in `!status full`, including after restart. Preparation failures distinguish prompts not submitted from attempted turns with uncertain acceptance/effects. The previous completed result stays available through `!last`. Idle status no longer displays the finished task's closed follow-up buffer as if it governed future input; an explicit fresh message can reuse the same conversation after a failure.
+
+Fixed transient Discord history lookup failures bypassing delivery retries. History and send operations now have distinct timeout diagnostics, transient HTTP history errors retry, and an unavailable history lookup never triggers a blind resend. Status includes the current process's latest delivery failure. All responses remain complete inline text with no file-upload fallback.
+
+Expected stdout closure during owned child shutdown is now logged as normal cleanup instead of an RPC-reader error; unexpected disconnects still fail pending work. The app-server handshake now reports the actual bridge package version. Neither correction establishes the cause of a host's initialization delay. No timeout defaults, CLI baseline, updater protocol or state schema changed. Additive error metadata fits existing interruption records; older errors cannot be reconstructed retroactively. See [failed-task diagnostics](docs/troubleshooting.md#failed-task-diagnostics) and [validation scope](docs/compatibility.md).
+
 ## 0.3.0 — 2026-09-15
 
 Ordinary messages sent in the active channel now add instructions to the same Codex turn through `turn/steer`. Startup follow-ups wait in a bounded memory buffer; receipts distinguish received, accepted, rejected and uncertain input. Ordering, owner/channel authorization, message deduplication, original deadlines and one active coding task are retained. Completion/stop/restart never replay input or turn it into independent queued tasks. Other channels' busy messages and active session/mode/`!run` changes remain rejected.

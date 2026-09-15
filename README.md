@@ -41,7 +41,7 @@ Follow [systemd installation](docs/service.md) to keep the bot running after log
 
 ## Everyday use
 
-All replies appear inline in chat, including long results and code, split into readable pages without file downloads. `!help` groups the commands by purpose. `!ping` and `!status` identify the running bridge version and reply format; `!status` shows a compact task summary; `!status full` adds diagnostics. If new replies still arrive as files, [verify the running installation](docs/deployment.md#verify-the-running-bot). `!stop` interrupts work; it does not undo edits or external effects. `!last` retrieves the saved result. Send another ordinary message in the active channel to add instructions **while Codex is working**. The bot confirms when Codex accepts each follow-up; other channels remain busy.
+All replies appear inline in chat, including long results and code, split into readable pages without file downloads. `!help` groups the commands by purpose. `!ping` and `!status` identify the running bridge version and reply format; `!status` shows a compact task summary; `!status full` adds diagnostics and the last saved task error, even if its notification was lost. If new replies still arrive as files, [verify the running installation](docs/deployment.md#verify-the-running-bot). `!stop` interrupts work; it does not undo edits or external effects. `!last` retrieves the saved result. Send another ordinary message in the active channel to add instructions **while Codex is working**. The bot confirms when Codex accepts each follow-up; other channels remain busy.
 
 See [chat controls and live follow-ups](docs/chat.md) for examples, receipts and mobile presentation.
 

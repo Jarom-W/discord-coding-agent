@@ -1,8 +1,10 @@
 import asyncio
 import hashlib
 import json
+import logging
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from jsonschema import ValidationError, validate
@@ -52,6 +54,25 @@ async def test_broken_transport_fails_pending(mode):
     finally:
         await rpc.close()
     assert rpc.process.returncode is not None and not rpc.tasks
+
+
+@pytest.mark.parametrize("closing", [False, True])
+async def test_eof_during_owned_shutdown_is_not_an_unexpected_disconnect(closing, caplog):
+    errors = []
+    rpc = Rpc(Timeouts(), lambda *_: None, lambda *_: None, errors.append)
+    reader = asyncio.StreamReader()
+    rpc.process = SimpleNamespace(stdout=reader)
+    rpc.closing = closing
+    reader.feed_eof()
+    with caplog.at_level(logging.INFO, logger="discord_coding_agent.rpc"):
+        await rpc._read()
+    if closing:
+        assert not errors and rpc.failure is None
+        assert not any(record.levelno >= logging.ERROR for record in caplog.records)
+        assert "reason=owned_shutdown" in caplog.text
+    else:
+        assert errors and rpc.failure
+        assert "rpc-reader" in caplog.text
 
 
 async def test_rpc_timeout_is_not_task_deadline():

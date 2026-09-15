@@ -4,6 +4,7 @@ import pytest
 
 from discord_coding_agent.delivery import INLINE_UNITS, Delivery, payloads
 from discord_coding_agent.engine import Pending
+from discord_coding_agent.errors import LimitError
 
 
 class Transport:
@@ -347,3 +348,84 @@ async def test_changed_layout_recovers_complete_text_and_same_layout_reconciles(
         assert transport.sends == sends  # Unchanged content reconciles without resending.
     finally:
         await recovery.close()
+
+
+@pytest.mark.parametrize("error", [TimeoutError(), OSError("temporary history outage")])
+async def test_history_lookup_failure_retries_before_sending(error, monkeypatch):
+    transport = Transport()
+    original_find = transport.find
+    calls = 0
+
+    async def find(marker):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise error
+        return await original_find(marker)
+
+    async def no_backoff(_):
+        return None
+
+    monkeypatch.setattr("discord_coding_agent.delivery.asyncio.sleep", no_backoff)
+    transport.find = find
+    delivery = Delivery(transport, 0.03, lambda _: True, lambda *_: True, lambda _: None)
+    assert await delivery.send_part("error message", "stable-marker", None) == 1
+    assert calls == 2 and transport.sends == 1
+
+
+async def test_history_timeout_is_classified_and_worker_can_deliver_next_job(monkeypatch):
+    transport = Transport()
+    calls = 0
+
+    async def failing_history(marker):
+        nonlocal calls
+        calls += 1
+        raise TimeoutError()
+
+    async def no_backoff(_):
+        return None
+
+    monkeypatch.setattr("discord_coding_agent.delivery.asyncio.sleep", no_backoff)
+    transport.find = failing_history
+    completed = []
+    delivery = Delivery(transport, 0.03, lambda _: True, lambda *_: True, completed.append)
+    delivery.start()
+    try:
+        delivery.text("Saved result", result_id="saved")
+        await asyncio.wait_for(delivery.queue.join(), 1)
+        assert calls == 3 and transport.sends == 0 and completed == []
+        assert delivery.failures == 1
+        assert "Discord history timed out" in delivery.status
+        assert "configured limit 0.03s" in delivery.status
+        transport.find = Transport.find.__get__(transport)
+        delivery.text("Recovered result", result_id="saved")
+        await asyncio.wait_for(delivery.queue.join(), 1)
+        assert completed == ["saved"] and transport.sends == 1
+    finally:
+        await delivery.close()
+
+
+async def test_ambiguous_send_and_failed_history_never_blindly_resend(monkeypatch):
+    transport = Transport()
+    transport.ambiguous = True
+    calls = 0
+
+    async def history(marker):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return None
+        raise TimeoutError()
+
+    async def no_backoff(_):
+        return None
+
+    monkeypatch.setattr("discord_coding_agent.delivery.asyncio.sleep", no_backoff)
+    transport.find = history
+    delivery = Delivery(transport, 0.03, lambda _: True, lambda *_: True, lambda _: None)
+    with pytest.raises(LimitError, match="Discord history timed out"):
+        await delivery.send_part("result", "marker", None)
+    assert transport.sends == 1 and calls == 3
+    transport.find = Transport.find.__get__(transport)
+    assert await delivery.send_part("result", "marker", None) == 1
+    assert transport.sends == 1

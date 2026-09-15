@@ -74,9 +74,16 @@ class DiscordTransport:
 
     async def find(self, marker: str) -> int | None:
         channel = await self.channel()
-        async for message in channel.history(limit=100):
-            if message.author == self.client.user and message.content.endswith(marker):
-                return message.id
+        try:
+            async for message in channel.history(limit=100):
+                if message.author == self.client.user and message.content.endswith(marker):
+                    return message.id
+        except discord.HTTPException as exc:
+            if exc.status >= 500 or exc.status == 429:
+                raise OSError("Transient Discord history failure") from None
+            raise BridgeError(
+                f"Discord history failed (HTTP {exc.status}); check View Channels and Read Message History permissions."
+            ) from None
         return None
 
     async def disable(self, message_id: int) -> None:

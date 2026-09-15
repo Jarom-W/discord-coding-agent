@@ -98,3 +98,25 @@ def test_corrupted_followup_metadata_is_preserved_and_refused(tmp_path, metadata
     with pytest.raises(BridgeError, match="corrupt"):
         store.load()
     assert store.path.read_bytes() == before
+
+
+@pytest.mark.parametrize("record", ["active", "last_interruption"])
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        {"failure": ""},
+        {"failure": 12},
+        {"failure": "x" * 4097},
+        {"turn_submission_attempted": "false"},
+        {"turn_submission_attempted": 1},
+    ],
+)
+def test_corrupted_failure_metadata_is_preserved_and_refused(tmp_path, record, metadata):
+    store = StateStore(tmp_path, "repo", "manual")
+    state = State("repo")
+    setattr(state, record, {"task_id": "task", **metadata})
+    store.save(state)
+    before = store.path.read_bytes()
+    with pytest.raises(BridgeError, match="corrupt"):
+        store.load()
+    assert store.path.read_bytes() == before

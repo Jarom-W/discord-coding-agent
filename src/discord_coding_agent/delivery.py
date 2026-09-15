@@ -111,13 +111,15 @@ class Delivery:
         self.worker: asyncio.Task[None] | None = None
         self.keys: set[str] = set()
         self.failures = 0
+        self.last_failure: str | None = None
 
     def start(self) -> None:
         self.worker = asyncio.create_task(self.run())
 
     @property
     def status(self) -> str:
-        return f"Outbound queued: {self.queue.qsize()}; delivery failures: {self.failures}. Use !last to recover saved output."
+        detail = f"\nLast delivery failure: {self.last_failure}" if self.last_failure else ""
+        return f"Outbound queued: {self.queue.qsize()}; delivery failures: {self.failures}. Use !last for completed output; !status full for task errors.{detail}"
 
     def put(self, job: Job, priority: int) -> None:
         if job.key in self.keys:
@@ -125,6 +127,9 @@ class Delivery:
         # Include the in-flight job so it always has room to requeue its next page.
         if len(self.keys) >= self.queue.maxsize:
             self.failures += 1
+            self.last_failure = (
+                "Delivery queue full (32 jobs); inspect the journal and saved task status."
+            )
             log.error(
                 "delivery=queue_full result=%s; saved result available via !last", job.result_id
             )
@@ -163,27 +168,36 @@ class Delivery:
     async def send_part(self, text: str, marker: str, pending: Pending | None) -> int:
         for attempt in range(3):
             started = time.monotonic()
+            operation = "Discord history"
             if pending and not self.valid(pending.id):
                 raise BridgeError("Request expired during delivery.")
             # Check before every send, including retry/restart, for an ambiguous previous success.
-            found = await asyncio.wait_for(self.transport.find(marker), self.timeout)
-            if found:
-                return found
             try:
+                found = await asyncio.wait_for(self.transport.find(marker), self.timeout)
+                if found:
+                    return found
+                operation = "Discord send"
+                started = time.monotonic()
                 return await asyncio.wait_for(
                     self.transport.send(text, marker, pending), self.timeout
                 )
             except (TimeoutError, OSError) as exc:
                 reported: BaseException = exc
                 if isinstance(exc, TimeoutError):
-                    reported = LimitError("Discord send", time.monotonic() - started, self.timeout)
+                    reported = LimitError(operation, time.monotonic() - started, self.timeout)
                 log_error(log, f"delivery-attempt-{attempt + 1}-limit-{self.timeout:g}s", reported)
                 if attempt == 2:
-                    # One last reconciliation: an HTTP timeout may have created the message.
-                    found = await asyncio.wait_for(self.transport.find(marker), self.timeout)
-                    if found:
-                        return found
-                    raise
+                    if operation == "Discord send":
+                        # One last reconciliation: an HTTP timeout may have created the message.
+                        try:
+                            found = await asyncio.wait_for(
+                                self.transport.find(marker), self.timeout
+                            )
+                            if found:
+                                return found
+                        except (TimeoutError, OSError) as history_error:
+                            log_error(log, "delivery-final-reconciliation", history_error)
+                    raise reported from None
                 await asyncio.sleep(2**attempt)
         raise AssertionError("unreachable")
 
@@ -232,6 +246,11 @@ class Delivery:
                 raise
             except Exception as exc:
                 self.failures += 1
+                self.last_failure = (
+                    str(exc)[:512]
+                    if isinstance(exc, BridgeError)
+                    else f"{type(exc).__name__}; inspect sanitized delivery logs."
+                )
                 log_error(log, f"delivery-{job.key}", exc)
             finally:
                 if finished:
