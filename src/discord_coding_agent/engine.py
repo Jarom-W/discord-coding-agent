@@ -118,6 +118,7 @@ class Engine:
         self.rpc: Rpc | None = None
         self.turn_id: str | None = None
         self.task_id = ""
+        self.turn_submission_attempted = False
         self.started: float | None = None
         self.elapsed: float | None = None
         self.task_limit = config.timeouts.task
@@ -208,6 +209,7 @@ class Engine:
             return
         self.task_id = uuid.uuid4().hex
         self.done = None
+        self.turn_submission_attempted = False
         self.started = time.monotonic()
         self.elapsed = None
         self.task_limit = task_limit
@@ -219,6 +221,7 @@ class Engine:
             "started_at": time.time(),
             "turn_id": None,
             "task_limit_seconds": task_limit,
+            "turn_submission_attempted": False,
         }
         self.state.interrupted = False
         try:
@@ -337,7 +340,7 @@ class Engine:
             f"**Last observed activity:** {self.last_event} ({age})\n"
             f"**Pending requests:** {', '.join(self.pending) or 'none'}\n"
             f"**Thread:** {self.state.thread_id or 'not created'}\n"
-            f"{self.followups.status() if self.followups else 'Follow-ups: none'}\n"
+            f"{self.followups.status() if self.busy and self.followups else 'Follow-ups: no active task in this session.'}\n"
             f"Interrupted: {self.state.interrupted}; last result delivered: {self.state.delivered}\n"
             f"{getattr(self.sink, 'status', '')}\n"
             f"-# {runtime.current().summary()}"
@@ -357,7 +360,44 @@ class Engine:
                     )
         elif self.phase == "initializing":
             text += f"\nPreparation step: {self.preparation_step}. Use !status full for timeout budgets."
+        interrupted = self.state.last_interruption or {}
+        if failure := interrupted.get("failure"):
+            if detailed or self.state.interrupted:
+                text += f"\n\n**Last task failure** (task {interrupted.get('task_id', 'unknown')}):\n{failure}"
+        elif self.state.interrupted:
+            text += "\nNo saved failure reason is available. Inspect the journal; !last is the previous completed result."
         return text
+
+    def record_failure(self, exc: Exception) -> str:
+        """Preserve a safe error before Discord delivery; never replace a completed result."""
+        error = (
+            str(exc)
+            if isinstance(exc, BridgeError)
+            else ("Bridge task failed. Inspect sanitized journal logs and run doctor.")
+        )
+        submission = (
+            "Turn submission was attempted; acceptance or effects may be uncertain. Inspect the repository and !last before continuing."
+            if self.turn_submission_attempted
+            else "This task's prompt was not submitted to Codex. After addressing startup, send a fresh message here; !new is not required."
+        )
+        message = (
+            f"{error}\nPreparation step: {self.preparation_step}. {submission} Nothing will be replayed automatically."
+        )[:4096]
+        if self.state.active:
+            self.state.active["failure"] = message
+            self.state.last_interruption = self.state.active.copy()
+        try:
+            self.save()
+        except (BridgeError, OSError) as storage_error:
+            # Cleanup must still release the owned process/lease if storage fails.
+            log_error(log, f"failure-save-{self.task_id}", storage_error)
+        log.warning(
+            "task=%s failure_stage=%s turn_submission_attempted=%s next=status-full/journal",
+            self.task_id,
+            self.preparation_step,
+            self.turn_submission_attempted,
+        )
+        return message
 
     def preparing(self, step: str) -> None:
         self.preparation_step = step
@@ -442,6 +482,10 @@ class Engine:
                         ) from exc
                     assert self.rpc
                     self.transition("running")
+                    assert self.state.active
+                    self.state.active["turn_submission_attempted"] = True
+                    self.save()
+                    self.turn_submission_attempted = True
                     response = await self.rpc.call(
                         "turn/start",
                         {
@@ -498,11 +542,7 @@ class Engine:
             self.state.interrupted = True
             self.transition("failed")
             log_error(log, f"task-{self.task_id}", exc)
-            self.sink.text(
-                str(exc)
-                if isinstance(exc, BridgeError)
-                else "Bridge task failed. Inspect sanitized journal logs and run doctor; uncertain work was not replayed."
-            )
+            self.sink.text(self.record_failure(exc))
         finally:
             if self.followups:
                 await self.followups.finish()

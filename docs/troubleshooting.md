@@ -15,6 +15,8 @@ journalctl --user -u discord-coding-agent.service -n 200 --no-pager -o short-iso
 
 | Symptom | Check and recovery |
 | --- | --- |
+| Failed task, but Gateway connected | The bridge can be running while its Codex task failed. Read the saved error in `!status full`; `!last` is the previous completed result. With no active task, a fresh ordinary message can start work in the same session after the cause is addressed. See [failed-task diagnostics](#failed-task-diagnostics). |
+| RPC-reader error after a successful result | Closing the owned Codex child ends stdout normally. Current releases log that as `transport=closed reason=owned_shutdown`; an unexpected EOF during work still reports an error. Correlate the error with the task transition rather than treating every historical reader-error line as a failed task. |
 | No response to `!ping` | Follow the ordered [Discord guide](discord.md): token, same application, saved Message Content Intent, owner/guild/channel IDs, bot membership, text-channel and category overrides. |
 | Replies download as text files on mobile | Current bridge code cannot upload files. Check the new message's author, timestamp and delivery marker, then the running version/reply format in `!ping`. Follow [running-installation verification](deployment.md#verify-the-running-bot); a checkout's HEAD or saved deployment SHA alone is insufficient. After correcting the installation, `!last` sends a fresh inline copy without rerunning Codex. Existing posted files stay unchanged. |
 | Em dashes or other Unicode look garbled | Inline replies preserve Unicode. Use `!last` for a fresh chat copy of a saved result. If a new message is garbled, report the running bridge version and a short non-sensitive example. |
@@ -49,6 +51,23 @@ journalctl --user -u discord-coding-agent.service -n 200 --no-pager -o short-iso
 | Expired/old buttons | Use `!status` and the current request ID. Old buttons cannot decide a different request, even after restart. If Discord was disconnected they may remain visible until cleanup; do not reuse their IDs. |
 | Undelivered complete result | Fix Discord connectivity/permissions, reconnect, or `!last`. Delivery retries are bounded and may need this explicit recovery. No model task is repeated. |
 | Empty thread cannot resume (`no rollout found`) | Codex has no persisted history for that thread, often because initialization succeeded but no turn/history was written. Inspect first; when appropriate choose `!new`. Do not silently recreate/replay the uncertain task. |
+
+## Failed-task diagnostics
+
+`State: failed` describes the last coding task. `Gateway: connected` and a responding `!status` show that Discord commands still reach the bridge; they do not prove that Codex initialized. `verified: False` after an initialization failure means reviewer verification was not completed for that attempt, not that automatic review rejected a command. Once cleanup finishes and no coding task is active, send a fresh ordinary message to explicitly try again in the same conversation. A closed follow-up buffer belongs to the finished task; it does not disable future messages.
+
+Read the **Last task failure** in `!status full` before continuing. The error survives restart and failed notifications; it does not replace the last completed result. Preparation failures report that the new prompt was not submitted. If turn submission was attempted, acceptance or effects may be uncertain: inspect the repository and affected external systems before deciding what to request next. The elapsed task value includes preparation and cleanup; use the saved error's named operation and configured limit to diagnose a timeout. Old interruptions that lack a saved reason still require their original journal entries.
+
+If `journalctl --user` reports **No journal files were found**, confirm the host/account and query the system journal with the user-unit filter. **On the Pi, as the account running the bot** (replace the unit name for a custom instance):
+
+```bash
+hostname
+id -un
+systemctl --user show discord-coding-agent.service --no-pager -p ActiveState -p MainPID -p ExecStart
+sudo journalctl _SYSTEMD_USER_UNIT=discord-coding-agent.service _UID="$(id -u)" -n 80 --no-pager -o short-iso
+```
+
+These commands inspect existing state and logs; they do not restart the bot. The privileged journal query may be needed when logs reside in the system journal. If it also has no entries, check the unit's `StandardOutput`/`StandardError` with `systemctl --user cat discord-coding-agent.service` and whether the journal has retained the relevant boot/time. Missing logs are not proof the bot stopped. Capture a new failure with the filtered journal following it (`-f`), then share only sanitized output and whether a fresh Discord message was accepted, rejected or silent.
 
 ## Service active but updater not ready
 
@@ -88,6 +107,23 @@ Codex [resumes a stored thread before a later `turn/start` submits new input](ht
 4. After resolving the cause, send an explicit continuation. No failed prompt is automatically replayed. If the failed operation was `turn/start`, the prompt may already have been accepted: inspect repository status/diffs and any external effects first.
 
 If a running bot still reports `RPC thread/resume ... configured limit 45s` rather than an initialization-budget failure, verify the deployed commit with `deploy status` and install the current fix. Consult the [release notes](../CHANGELOG.md) for the temporary workaround on affected releases. Never publish raw Codex logs, authentication caches, private state or full prompts while collecting evidence.
+
+### Check host resource stalls
+
+If startup repeatedly fails, collect host evidence **on the Pi** before changing timeout defaults:
+
+```bash
+uptime
+free -h
+ps -eo pid,ppid,stat,pcpu,pmem,comm --sort=-pcpu | head -n 15
+vmstat 1 5
+cat /proc/pressure/io
+sudo journalctl -k --since "1 hour ago" -p warning --no-pager -n 60
+```
+
+If `/proc/pressure/io` is missing, skip that optional metric; the running kernel may not provide pressure accounting. If the journal query stalls, `sudo dmesg --level=emerg,alert,crit,err,warn --ctime | tail -n 60` reads recent warnings from the kernel ring buffer. `findmnt -no SOURCE,FSTYPE /` identifies the root device, and `ps -eo pid,stat,wchan:32,comm` shows where blocked processes are waiting.
+
+A `D` process state is an uninterruptible wait; it can indicate I/O blocking and is not by itself proof of a failed disk. Check the kernel warnings for storage errors and [I/O pressure measurements](https://docs.kernel.org/accounting/psi.html) for ongoing stalls. A low `free` memory column is not an out-of-memory diagnosis: also read `available`; occupied swap alone does not prove current swap activity. If `apt`/`dpkg` is running, let it finish and inspect its progress instead of killing it, deleting package locks or rebooting during the operation. Recheck Codex startup after the host settles; preserve evidence if the wait persists.
 
 ## Interrupted-task recovery
 

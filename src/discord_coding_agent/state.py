@@ -120,6 +120,16 @@ class StateStore:
                 if record is not None and not isinstance(record, dict):
                     raise ValueError()
                 if record is not None:
+                    if "failure" in record and (
+                        not isinstance(record["failure"], str)
+                        or not 1 <= len(record["failure"]) <= 4096
+                    ):
+                        raise ValueError()
+                    if (
+                        "turn_submission_attempted" in record
+                        and type(record["turn_submission_attempted"]) is not bool
+                    ):
+                        raise ValueError()
                     receipts = record.get("followups", [])
                     accepted = record.get("followups_accepted", 0)
                     if (

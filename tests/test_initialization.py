@@ -192,6 +192,9 @@ async def test_turn_start_retains_request_timeout_after_resume(preparation, owne
     errors = "\n".join(text for text, _ in sink.texts)
     assert "RPC turn/start timed out" in errors and "configured limit 45s" in errors
     assert "prompt was not submitted" not in errors  # This submission is uncertain.
+    saved = e.store.load().last_interruption
+    assert saved["turn_submission_attempted"] is True
+    assert "acceptance or effects may be uncertain" in saved["failure"]
     assert len([m for m, _ in rpc.calls if m == "turn/start"]) == 1
     assert rpc.closing and not rpc.pending and not rpc.tasks
 
@@ -209,3 +212,59 @@ async def test_stop_and_session_change_during_resume(preparation, owner):
     assert not any(m == "turn/start" for m, _ in rpc.calls)
     assert rpc.closing and not rpc.pending and not rpc.tasks
     assert any("does not undo" in text for text, _ in sink.texts)
+
+
+async def test_initialize_failure_is_durable_and_a_fresh_message_recovers(
+    preparation, owner, advance_clock
+):
+    e, sink, rpc = preparation
+    rpc.gates["initialize"] = asyncio.Event()
+    await e.message(owner, "first request must not be replayed")
+    await rpc.wait_for_call("initialize")
+    await advance_clock(121)
+    await asyncio.wait_for(e.worker, 1)
+    assert e.phase == "failed" and not e.busy and e.activity.fd is None
+    assert not any(m == "turn/start" for m, _ in rpc.calls)
+    persisted = e.store.load()
+    assert "initialization timed out" in persisted.last_interruption["failure"]
+    assert "prompt was not submitted" in persisted.last_interruption["failure"]
+    assert "initialization timed out" in e.status(detailed=True)
+    assert persisted.last_result == "previous saved result"
+    assert persisted.last_interruption["turn_submission_attempted"] is False
+    restored = Engine(e.config, e.store, sink)
+    assert persisted.last_interruption["failure"] in restored.status(detailed=True)
+    assert restored.state.thread_id == "thread-1"
+    assert not restored.busy and restored.rpc is None
+    assert "input closed" not in e.status()
+    sink.texts.clear()  # Simulate a notification the owner never received.
+    recovered = GatedRpc(e.config.timeouts, e.event, e.request, e.disconnected)
+    e.rpc_factory = lambda *_: recovered
+    try:
+        await e.message(replace(owner, message=101), "fresh explicit task")
+        await recovered.wait_for_call("turn/start")
+        for _ in range(4):
+            await asyncio.sleep(0)
+        complete(e, "Recovered task result")
+        await asyncio.wait_for(e.worker, 1)
+        submitted = [p["input"][0]["text"] for m, p in recovered.calls if m == "turn/start"]
+        assert submitted == ["fresh explicit task"]
+        assert e.phase == "idle" and not e.state.interrupted
+    finally:
+        await recovered.close()
+
+
+async def test_unknown_startup_failure_is_sanitized_and_retained(engine, owner, caplog):
+    e, sink, _ = engine
+    private_detail = "secret token and private prompt body"
+
+    async def fail():
+        raise RuntimeError(private_detail)
+
+    e._prepare = fail
+    await e.message(owner, "prompt must not appear in diagnostics")
+    await e.worker
+    failure = e.store.load().last_interruption["failure"]
+    assert "Bridge task failed" in failure and "prompt was not submitted" in failure
+    assert private_detail not in failure + caplog.text + repr(sink.texts)
+    assert "prompt must not appear" not in e.store.path.read_text() + caplog.text
+    assert not e.busy and e.activity.fd is None
