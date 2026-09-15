@@ -15,26 +15,39 @@ from typing import Any, Protocol
 from . import protocol, runtime
 from .config import Config, discover_codex, repository_identity
 from .errors import BridgeError, LimitError, log_error
+from .followups import Followups
 from .locks import Lease
 from .rpc import Json, Rpc
 from .state import MAX_RESULT, StateStore
 
 log = logging.getLogger(__name__)
 
-HELP = """Ordinary text starts/continues the saved Codex conversation. One active task; busy messages are NOT submitted.
-!help — commands and limitations
-!ping — Discord connection test and running bridge version/reply format; no model
-!status — running release, operational state, thread, mode, elapsed, last observed activity, pending requests
-!run 30m task text — submit one task with a time limit (s/m/h, e.g. 90s or 1.5h); !run unlimited task text removes the task limit for that task
-!new [auto|manual] — fresh conversation; current mode if omitted; idle only
-!approvals — selected mode and verification scope
-!approve ID / !deny ID — decide a pending approval (same path as buttons)
-!answer ID text — answer one question; for multiple: !answer ID {"question_id":["answer"],"other_id":["answer"]}
-!stop — interrupt, then stop the owned child if necessary; does not undo edits/external effects
-!last — retrieve the last saved result
-Use !new, !session or !repo to switch through the bridge. Asking Codex to “open a new chat” in prose does not switch it.
-Ordinary text uses the configured task limit (default: none). !run overrides it for one task, including initialization and human wait; it cannot change active work. Natural-language time rules are passed to Codex; use !run for an enforced timer. Approval and connection timeouts still apply.
-Text and repository paths only; attachments are rejected. Internet and valid Codex authentication required. Manual mode reviews sandbox escalations, not every edit. The service waits for your messages; no autonomous schedule."""
+HELP = """## Chat and tasks
+Send ordinary text to start or continue this channel's saved conversation. Send more text while I work to add instructions to the **same task**; watch for a Codex acceptance receipt.
+`!help` — this guide
+`!ping` — connectivity and running version; no model
+`!status` — task, activity, approvals and delivery
+`!status full` — also show initialization/RPC diagnostics
+`!stop` — interrupt work; does not undo completed edits or external effects
+`!last` — retrieve the last saved result, inline
+
+## Time limits
+`!run 30m task text` — enforce a limit for a new task (s/m/h, e.g. 90s or 1.5h)
+`!run unlimited task text` — no deadline for that new task
+Ordinary text uses the configured limit (default: none). Follow-ups never reset it. Limits include startup and human wait. Natural-language time rules go to Codex; use !run for an enforced timer. !run cannot change active work.
+
+## Approvals and questions
+`!new [auto|manual]` — fresh conversation; idle only
+`!approvals` — selected mode and verification scope
+`!approve ID` / `!deny ID` — same decision as the green/red buttons
+`!answer ID text` — answer one question
+Multiple questions: `!answer ID {"question_id":["answer"],"other_id":["answer"]}`
+Follow-up text does not approve actions or answer pending structured questions. Manual mode reviews sandbox escalations, not every edit.
+
+## Boundaries
+One task across all channels. Other channels' busy messages are NOT submitted. During startup, up to 8 follow-ups can wait in memory; they are never replayed after failure/restart. A lost acceptance is reported as uncertain.
+Use !new, !session or !repo to switch conversations while idle. Asking Codex to “open a new chat” in prose does not switch the bridge.
+Text and repository paths only; attachments are rejected. Replies always stay inline, including code and long results. Internet and valid Codex authentication required. The service waits for your messages; no autonomous schedule."""
 
 
 def parse_task_limit(value: str) -> float:
@@ -118,6 +131,7 @@ class Engine:
         self.timers: dict[str, asyncio.Task[None]] = {}
         self.seen = set(self.state.seen_messages)
         self.activity = Lease(activity_path or config.state_dir / "activity.lock")
+        self.followups: Followups | None = None
 
     @property
     def busy(self) -> bool:
@@ -169,7 +183,10 @@ class Engine:
             except BridgeError as exc:
                 self.sink.text(str(exc))
             return
-        self.submit(origin, content, self.config.timeouts.task)
+        if self.busy and self.followups:
+            self.followups.receive(origin.message, content)
+        else:
+            self.submit(origin, content, self.config.timeouts.task)
 
     def submit(self, origin: Origin, content: str, task_limit: float) -> None:
         """Reserve a task atomically after message authorization and deduplication."""
@@ -190,6 +207,7 @@ class Engine:
             )
             return
         self.task_id = uuid.uuid4().hex
+        self.done = None
         self.started = time.monotonic()
         self.elapsed = None
         self.task_limit = task_limit
@@ -210,16 +228,19 @@ class Engine:
             self.activity.close()
             raise
         self.transition("initializing")
+        self.followups = Followups(self)
         log.info("task=%s task_limit_seconds=%g (0=unlimited)", self.task_id, task_limit)
         self.worker = asyncio.create_task(self._run(content), name=f"coding-{self.task_id}")
         self.sink.text(
-            f"Accepted task {self.task_id[:12]}. Task limit: {describe_task_limit(task_limit)}. Use !status for last observed activity; !stop to interrupt."
+            f"**Task accepted · {self.task_id[:12]}**\n"
+            f"Task limit: {describe_task_limit(task_limit)}.\n"
+            "Send another message here to add instructions while I work. `!status` checks activity; `!stop` interrupts."
         )
 
     async def command(self, origin: Origin, content: str) -> None:
         parts = content.split(maxsplit=2)
         cmd = parts[0].lower()
-        if cmd in {"!help", "!ping", "!status", "!approvals", "!last", "!stop"} and len(parts) != 1:
+        if cmd in {"!help", "!ping", "!approvals", "!last", "!stop"} and len(parts) != 1:
             raise BridgeError(f"{cmd} takes no arguments; see !help.")
         if cmd == "!help":
             self.sink.text(HELP)
@@ -229,7 +250,9 @@ class Engine:
                 f"\n{runtime.current().summary()}"
             )
         elif cmd == "!status":
-            self.sink.text(self.status())
+            if len(parts) > 2 or (len(parts) == 2 and parts[1].lower() != "full"):
+                raise BridgeError("Use !status or !status full.")
+            self.sink.text(self.status(detailed=len(parts) == 2))
         elif cmd == "!run":
             if len(parts) != 3:
                 raise BridgeError(
@@ -295,7 +318,7 @@ class Engine:
         )
         return f"Selected mode: {self.state.mode}; policy on-request; sandbox workspace-write. {detail} {verification}"
 
-    def status(self) -> str:
+    def status(self, *, detailed: bool = False) -> str:
         now = time.monotonic()
         duration = (
             self.elapsed
@@ -306,16 +329,35 @@ class Engine:
         )
         elapsed = f"{duration:.1f}s" if duration is not None else "n/a"
         age = f"{now - self.last_event_at:.1f}s ago" if self.last_event_at else "n/a"
-        return (
-            f"{runtime.current().summary()}\n"
-            f"State: {self.phase if self.connected else 'disconnected'}; task phase: {self.phase}; Gateway: {'connected' if self.connected else 'disconnected'}\n"
-            f"Thread: {self.state.thread_id or 'not created'}; mode: {self.state.mode}; verified: {self.verified}\n"
-            f"Elapsed: {elapsed}; last observed activity: {self.last_event} ({age})\n"
-            f"Pending: {', '.join(self.pending) or 'none'}; interrupted: {self.state.interrupted}; last result delivered: {self.state.delivered}\n"
-            f"Preparation step: {self.preparation_step}; initialization budget: {self.config.timeouts.initialization:g}s; ordinary RPC limit: {self.config.timeouts.request:g}s\n"
+        text = (
+            f"**State: {self.phase}** · Gateway: {'connected' if self.connected else 'disconnected'}\n"
+            f"**Mode:** {self.state.mode} · verified: {self.verified}\n"
+            f"**Elapsed:** {elapsed} · {'Active' if self.busy else 'Default'} task limit: "
+            f"{describe_task_limit(self.task_limit if self.busy else self.config.timeouts.task)}\n"
+            f"**Last observed activity:** {self.last_event} ({age})\n"
+            f"**Pending requests:** {', '.join(self.pending) or 'none'}\n"
+            f"**Thread:** {self.state.thread_id or 'not created'}\n"
+            f"{self.followups.status() if self.followups else 'Follow-ups: none'}\n"
+            f"Interrupted: {self.state.interrupted}; last result delivered: {self.state.delivered}\n"
             f"{getattr(self.sink, 'status', '')}\n"
-            f"{'Active' if self.busy else 'Default'} task limit: {describe_task_limit(self.task_limit if self.busy else self.config.timeouts.task)}. Quiet logs/typing are not proof a task is stuck."
+            f"-# {runtime.current().summary()}"
         )
+        if detailed:
+            text += (
+                f"\n\n**Diagnostics**\nTask: {self.task_id or 'none'}\n"
+                f"Preparation step: {self.preparation_step}; initialization budget: {self.config.timeouts.initialization:g}s; ordinary RPC limit: {self.config.timeouts.request:g}s\n"
+                "Quiet logs/typing are not proof a task is stuck."
+            )
+            if self.state.last_interruption:
+                records = self.state.last_interruption.get("followups", [])
+                if records:
+                    text += (
+                        "\nInterrupted task's follow-up metadata (never replayed):\n"
+                        + json.dumps(records, ensure_ascii=False)
+                    )
+        elif self.phase == "initializing":
+            text += f"\nPreparation step: {self.preparation_step}. Use !status full for timeout budgets."
+        return text
 
     def preparing(self, step: str) -> None:
         self.preparation_step = step
@@ -414,7 +456,11 @@ class Engine:
                         and not self.done.done()
                     ):
                         self.done.set_result(turn)
+                    assert self.followups and self.state.thread_id and self.turn_id
+                    if not self.done.done():
+                        self.followups.activate(self.rpc, self.state.thread_id, self.turn_id)
                     completed = await self.done
+                    await self.followups.finish()
                     status = completed.get("status")
                     if status != "completed":
                         raise BridgeError(
@@ -424,6 +470,8 @@ class Engine:
                         "\n\n".join(self.messages.values())
                         or "Codex completed with no assistant text. Inspect repository changes and !status."
                     )
+                    if notice := self.followups.problems():
+                        result += "\n\n" + notice
                     self.state.last_result = result
                     self.state.result_id = self.task_id
                     self.state.delivered = False
@@ -456,6 +504,8 @@ class Engine:
                 else "Bridge task failed. Inspect sanitized journal logs and run doctor; uncertain work was not replayed."
             )
         finally:
+            if self.followups:
+                await self.followups.finish()
             if self.state.interrupted and self.state.active:
                 self.state.last_interruption = self.state.active.copy()
             self.invalidate_all()
@@ -543,6 +593,8 @@ class Engine:
                     "Codex reports a declined action. In auto mode this may be an automatic-review rejection. Review the final explanation before retrying; restrictions remain in effect."
                 )
         elif method == "turn/completed" and self.done and not self.done.done():
+            if self.followups:
+                self.followups.seal()
             self.invalidate_all()
             self.done.set_result(params["turn"])
         elif method == "error":
@@ -804,6 +856,8 @@ class Engine:
         worker = self.worker
         if not worker or worker.done():
             return
+        if self.followups:
+            self.followups.seal()
         if self.rpc and self.turn_id:
             try:
                 await self.rpc.call(
@@ -820,6 +874,8 @@ class Engine:
             await worker
         except asyncio.CancelledError:
             # Cancellation can happen before _run has entered its try/finally.
+            if self.followups:
+                await self.followups.finish()
             self.activity.close()
             self.state.interrupted = True
             self.state.last_interruption = self.state.active

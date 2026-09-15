@@ -30,7 +30,7 @@ Select only these permissions:
 - **Send Messages** — replies and controls.
 - **Read Message History** — reconcile an HTTP timeout with a possibly already-sent result.
 
-Replies are split into inline messages, so Attach Files is unnecessary. Do not grant Administrator. If using **OAuth2 → URL Generator** instead of Installation, select `bot` and the same permissions. See [OAuth2 scopes](https://docs.discord.com/developers/topics/oauth2) and [Discord permissions](https://docs.discord.com/developers/topics/permissions).
+Replies use native Markdown headings, small labels and inline text pages. Attach Files and Embed Links are unnecessary. Do not grant Administrator. If using **OAuth2 → URL Generator** instead of Installation, select `bot` and the same permissions. See [OAuth2 scopes](https://docs.discord.com/developers/topics/oauth2) and [Discord permissions](https://docs.discord.com/developers/topics/permissions).
 
 ## 5. Install into your server — in a browser/Discord
 
@@ -83,3 +83,5 @@ Create another private normal text channel **in this same server** and repeat th
 - **Invisible channel:** check bot membership and category/channel View Channel overrides.
 - **No send or no long reply:** check Send Messages and Read Message History. The journal reports missing permissions; `!last` recovers the saved result after they are fixed.
 - **Network:** the Pi needs outbound internet/WebSocket and HTTPS connectivity. No incoming ports, router forwarding or **Interactions Endpoint URL** is used; leave that endpoint blank for this app.
+
+For active-task follow-ups, the compact status view and mobile display expectations, see [chat controls](chat.md). No new bot installation, intent, OAuth scope or permission is required.

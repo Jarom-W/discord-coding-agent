@@ -105,7 +105,9 @@ async def test_run_exclusivity_dedup_and_busy_timer_unchanged(engine, owner):
     await asyncio.sleep(0)
     assert e.task_limit == 7200
     assert len([call for call in rpc.calls if call[0] == "turn/start"]) == 1
-    assert sum("NOT submitted" in text for text, _ in sink.texts) == 2
+    await e.followups.worker
+    assert sum("NOT submitted" in text for text, _ in sink.texts) == 1
+    assert e.followups.accepted == 1
     complete(e)
     await e.worker
 

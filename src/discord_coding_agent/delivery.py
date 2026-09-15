@@ -1,6 +1,7 @@
 """Bounded delivery with retries and history reconciliation, never coding-task retries."""
 
 import asyncio
+import hashlib
 import logging
 import re
 import time
@@ -91,6 +92,7 @@ class Job:
     disable_id: int | None = None
     parts: Iterator[Page] | None = field(default=None, repr=False)
     page: int = 0
+    fingerprint: str = ""
 
 
 class Delivery:
@@ -141,7 +143,8 @@ class Delivery:
         )
 
     def request(self, pending: Pending) -> None:
-        heading = f"Request {pending.id}\n{pending.method}\n"
+        kind = "Question" if pending.method.endswith("requestUserInput") else "Approval needed"
+        heading = f"## {kind}\nRequest: `{pending.id}`\n{pending.method}\n\n"
         self.put(Job(heading + pending.details, pending.id, pending=pending), 1)
 
     def invalidate(self, pending: Pending) -> None:
@@ -194,10 +197,15 @@ class Delivery:
                     continue
                 if job.parts is None:
                     job.parts = payloads(job.text)
+                    # A changed session label/layout shifts page boundaries. Never
+                    # reconcile against pages generated from different source text.
+                    job.fingerprint = hashlib.sha256(
+                        b"inline-layout-2\n" + job.text.encode("utf-8")
+                    ).hexdigest()[:16]
                 page = next(job.parts, None)
                 if page is not None:
                     job.page += 1
-                    marker = f"[dca:{job.key}:inline:{job.page}]"
+                    marker = f"[dca:{job.key}:inline:{job.fingerprint}:{job.page}]"
                     await self.send_part(page.content, marker, job.pending)
                     # Yield between pages: controls and short replies must stay responsive.
                     self.enqueue(job, priority)

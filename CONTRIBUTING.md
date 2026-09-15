@@ -50,7 +50,7 @@ Follow [the walkthrough](docs/walkthrough.md) for live Discord/buttons/phone/har
 DCA_TEST_LIVE_MODEL=1 DCA_TEST_LIVE_REPO="$HOME/work/codex-bridge-demo" uv run --frozen pytest -q tests/test_live_model.py
 ```
 
-The target must be an intentionally disposable Git repository with a `.dca-disposable` marker. This test checks a read-only request and conversation follow-up without Discord. Do not claim it tests the live Gateway or physical Pi. Never put production credentials in GitHub Actions secrets merely to run this project's CI.
+The target must be an intentionally disposable Git repository with a `.dca-disposable` marker. This test checks a read-only request and a subsequent conversation turn without Discord; it does not exercise live mid-turn steering. Use the disposable [follow-up walkthrough](docs/chat.md) for manual acceptance. Do not claim it tests the live Gateway or physical Pi. Never put production credentials in GitHub Actions secrets merely to run this project's CI.
 
 ## PR/release review
 

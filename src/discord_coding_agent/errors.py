@@ -9,6 +9,17 @@ class BridgeError(Exception):
     pass
 
 
+class RpcRejected(BridgeError):
+    """A correlated server rejection, distinct from an uncertain transport outcome."""
+
+    def __init__(self, request_id: str | int, code: object) -> None:
+        self.code = code
+        super().__init__(
+            f"Codex RPC rejected request {request_id} (code {code}). Run doctor; inspect "
+            "authentication, managed policy and CLI compatibility. Server payload omitted for privacy."
+        )
+
+
 class LimitError(BridgeError):
     def __init__(
         self, operation: str, elapsed: float, limit: float, *, diagnostic: str | None = None

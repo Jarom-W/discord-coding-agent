@@ -74,3 +74,27 @@ def test_failed_replace_preserves_previous_state(tmp_path, monkeypatch):
     with pytest.raises(OSError):
         atomic_write(path, "new")
     assert path.read_text() == "old"
+
+
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        {"followups": "bad"},
+        {"followups": [{}] * 33},
+        {"followups_accepted": True},
+        {"followups": [{"number": 1, "message_id": 99, "status": "replay-me"}]},
+        {"followups": [{"number": 1, "message_id": True, "status": "waiting"}]},
+        {
+            "followups": [
+                {"number": 1, "message_id": 99, "status": "waiting", "text": "unexpected body"}
+            ]
+        },
+    ],
+)
+def test_corrupted_followup_metadata_is_preserved_and_refused(tmp_path, metadata):
+    store = StateStore(tmp_path, "repo", "manual")
+    store.save(State("repo", active={"task_id": "task", **metadata}))
+    before = store.path.read_bytes()
+    with pytest.raises(BridgeError, match="corrupt"):
+        store.load()
+    assert store.path.read_bytes() == before

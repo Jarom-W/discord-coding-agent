@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import Timeouts
-from .errors import BridgeError, LimitError, log_error
+from .errors import BridgeError, LimitError, RpcRejected, log_error
 
 log = logging.getLogger(__name__)
 Json = dict[str, Any]
@@ -158,12 +158,11 @@ class Rpc:
                     if future and not future.done():
                         if "error" in message:
                             error = message["error"]
-                            code = error.get("code") if isinstance(error, dict) else "invalid"
-                            future.set_exception(
-                                BridgeError(
-                                    f"Codex RPC rejected request {message['id']} (code {code}). Run doctor; inspect authentication, managed policy and CLI compatibility. Server payload omitted for privacy."
+                            if not isinstance(error, dict) or type(error.get("code")) is not int:
+                                raise BridgeError(
+                                    "Malformed Codex RPC error envelope; outcome unknown."
                                 )
-                            )
+                            future.set_exception(RpcRejected(message["id"], error["code"]))
                         elif isinstance(message.get("result"), dict):
                             future.set_result(message["result"])
                         else:

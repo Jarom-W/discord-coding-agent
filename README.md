@@ -41,9 +41,11 @@ Follow [systemd installation](docs/service.md) to keep the bot running after log
 
 ## Everyday use
 
-All replies appear inline in chat, including long results and code, split into readable pages without file downloads. `!help` lists the commands. `!ping` and `!status` identify the running bridge version and reply format; `!status` also reports task state and last observed activity. If new replies still arrive as files, [verify the running installation](docs/deployment.md#verify-the-running-bot). `!stop` interrupts work; it does not undo edits or external effects. `!last` retrieves the saved result. Busy messages are explicitly rejected as **not submitted**.
+All replies appear inline in chat, including long results and code, split into readable pages without file downloads. `!help` groups the commands by purpose. `!ping` and `!status` identify the running bridge version and reply format; `!status` shows a compact task summary; `!status full` adds diagnostics. If new replies still arrive as files, [verify the running installation](docs/deployment.md#verify-the-running-bot). `!stop` interrupts work; it does not undo edits or external effects. `!last` retrieves the saved result. Send another ordinary message in the active channel to add instructions **while Codex is working**. The bot confirms when Codex accepts each follow-up; other channels remain busy.
 
-Tasks have **no bridge time limit by default**. Use `!run 30m Fix the failing tests` for an enforced cap, or `!run unlimited …` to remove the deadline for one task. Codex still stops when it finishes or fails; approval, connection and usage limits still apply. See the [command and timeout reference](docs/reference.md).
+See [chat controls and live follow-ups](docs/chat.md) for examples, receipts and mobile presentation.
+
+Tasks have **no bridge time limit by default**. Use `!run 30m Fix the failing tests` for an enforced cap, or `!run unlimited …` to remove the deadline for one task. Follow-ups keep the original deadline. Codex still stops when it finishes or fails; approval, connection and usage limits still apply. See the [command and timeout reference](docs/reference.md).
 
 Manual mode shows green **Approve** and red **Deny** buttons when your decision is needed. `!new auto` selects Codex's automatic approval reviewer while retaining the workspace sandbox; eligible requests can be approved or rejected. Settings are verified before work. Use `!new manual` for manual review.
 
@@ -83,7 +85,7 @@ cd "$HOME/services/discord-coding-agent"
 ## Guides
 
 - [Discord setup](docs/discord.md) · [Pi and Codex setup](docs/pi-codex.md) · [End-to-end walkthrough](docs/walkthrough.md)
-- [Commands and configuration](docs/reference.md) · [Channel workspaces](docs/workspaces.md)
+- [Chat controls and live follow-ups](docs/chat.md) · [Commands and configuration](docs/reference.md) · [Channel workspaces](docs/workspaces.md)
 - [systemd and manual updates](docs/service.md) · [Automatic deployment](docs/deployment.md) · [Troubleshooting](docs/troubleshooting.md)
 - [Architecture](docs/architecture.md) · [Compatibility and limitations](docs/compatibility.md) · [Security](SECURITY.md)
 - [Contributing](CONTRIBUTING.md) · [Release history](CHANGELOG.md)

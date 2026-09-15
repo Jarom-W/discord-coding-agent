@@ -52,7 +52,7 @@ Use `!repo --fresh PATH` to explicitly create a separate saved session even when
 
 Names are case-insensitive within a channel and must have 1–48 printable characters, excluding `/` and `\`. Names can contain spaces. A name can be reused in another channel because channels have separate session lists. Nothing imports unrelated Codex CLI conversations automatically; this list contains conversations created or retained by this bridge.
 
-Prose such as “open a new chat” is passed to Codex and does not change bridge routing. Use `!new`, `!session` or `!repo` explicitly. All selection/name/mode changes are rejected while **any channel** is running work or maintenance holds the shared lock. Busy coding messages are not queued and report that they were not submitted. `!stop` can interrupt the active task from another bound channel; approval buttons/text answers remain restricted to the request's own channel and active turn.
+Prose such as “open a new chat” is passed to Codex and does not change bridge routing. Use `!new`, `!session` or `!repo` explicitly. All selection/name/mode changes are rejected while **any channel** is running work or maintenance holds the shared lock. Ordinary text in the active channel adds instructions to that same task; it does not switch sessions or repositories. Follow-ups received during startup wait in a bounded memory buffer until Codex acknowledges the turn. Coding messages in other channels report that they were not submitted. See [chat controls](chat.md). `!stop` can interrupt the active task from another bound channel; approval buttons/text answers remain restricted to the request's own channel and active turn.
 
 ## Add a channel — in Discord
 

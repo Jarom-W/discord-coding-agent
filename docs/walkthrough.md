@@ -103,3 +103,23 @@ Only after the disconnect test, and while no task is running, deliberately reboo
 ## 11. Optional automatic update acceptance
 
 Use a disposable test instance and your own public fork. Follow [deployment setup](deployment.md), merge a harmless change to main, and wait for successful main push CI. `deploy check` should deploy the matching SHA, then `!ping`, `!status` and a read-only follow-up should work. Repeat while a task is active: the prepared update must defer until idle. This is separate from the unit tests and is not claimed as already exercised on a physical Pi or production bot.
+
+## Add instructions while a task is active — in Discord
+
+Use the disposable demo repository from this guide. Send:
+
+```text
+Read-only: inspect the demo repository and explain its structure. Do not edit files.
+```
+
+As soon as the bridge accepts the task (including while initializing), send:
+
+```text
+Also include which tests exist and how to run them. Keep this read-only.
+```
+
+Expect a follow-up receipt followed by **accepted by Codex** for the same task. Send `!status` to see the accepted count and unchanged deadline, or `!status full` for startup/RPC diagnostics. If the first task has already finished, this is a normal next turn in the same conversation. A completion race is explicitly reported; no uncertain input is silently resubmitted.
+
+Repeat with `!run 2m` before the initial prompt if you want a hard cap; the follow-up must not restart that timer. During a manual approval or question, extra ordinary text supplies context but does not press Approve/Deny or answer the structured question. Use the displayed controls or `!answer` separately.
+
+On your phone, inspect `!help`, `!status` and a long answer with fenced code: everything should appear in chat, with grouped headings and small session/delivery labels. No reply should require a file download. This is a live acceptance procedure for your disposable session, not a claim that mobile/model behavior was exercised in automated CI. See [chat controls and limits](chat.md).
