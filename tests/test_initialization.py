@@ -134,7 +134,7 @@ async def test_preparation_survives_ordinary_rpc_limit(preparation, owner, advan
     assert not any(m == "turn/start" for m, _ in rpc.calls)
     assert not any(future.done() for future in rpc.pending.values())
     assert f"Preparation step: {method}" in e.status()
-    assert "initialization budget: 120s; ordinary RPC limit: 45s" in e.status()
+    assert "initialization budget: 120s; ordinary RPC limit: 45s" in e.status(detailed=True)
     rpc.gates[method].set()
     await rpc.wait_for_call("turn/start")
     for _ in range(8):

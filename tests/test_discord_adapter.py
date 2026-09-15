@@ -286,9 +286,9 @@ async def test_help_is_inline_complete_unicode_without_model_or_mentions(config,
         await client.on_message(message)  # Duplicate Gateway delivery must not send help twice.
         await client.delivery.queue.join()
         calls = channel.send.await_args_list
-        assert len(calls) == 2
+        assert 2 <= len(calls) <= 4
         sent = "".join(call.args[0].rpartition("\n")[0] for call in calls)
-        assert sent == WORKSPACE_HELP + "\n" + HELP
+        assert sent == HELP + "\n\n" + WORKSPACE_HELP
         assert "\u2014" in sent and "\u00e2\u20ac\u201d" not in sent
         for call in calls:
             assert "file" not in call.kwargs
@@ -365,9 +365,53 @@ async def test_saved_legacy_result_is_recovered_inline_after_restart(config, tmp
         calls = channel.send.await_args_list
         assert len(calls) > 8
         assert "".join(call.args[0].rpartition("\n")[0] for call in calls) == (
-            "Session: main\n" + content
+            "-# Session: main\n" + content
         )
         assert all("file" not in call.kwargs and "files" not in call.kwargs for call in calls)
         assert client.engine.rpc is None
     finally:
         await client.close()
+
+
+async def test_subtext_footer_still_reconciles_bot_messages_only():
+    client = SimpleNamespace(user=object())
+    transport = DiscordTransport(client)
+    marker = "[dca:stable-key:inline:1]"
+    messages = [
+        SimpleNamespace(id=1, author=object(), content="forged\n-# " + marker),
+        SimpleNamespace(id=2, author=client.user, content="reply\n-# " + marker),
+    ]
+
+    async def history(**kwargs):
+        assert kwargs["limit"] == 100
+        for message in messages:
+            yield message
+
+    transport.channel = AsyncMock(return_value=SimpleNamespace(history=history))
+    assert await transport.find(marker) == 2
+
+
+@pytest.mark.parametrize("command", ["!status", "!status full"])
+async def test_status_is_one_grouped_reply_and_keeps_diagnostics(connected_client, owner, command):
+    client, _, channel = connected_client
+    # Ordinary Discord permissions: no Embed Links or Attach Files are needed.
+    channel.send = AsyncMock(return_value=SimpleNamespace(id=901))
+    delivery = client.delivery
+    delivery.transport.channel = AsyncMock(return_value=channel)
+    delivery.transport.find = AsyncMock(return_value=None)
+    # Discard startup greeting so this test observes only its requested status.
+    while not delivery.queue.empty():
+        _, _, job = delivery.queue.get_nowait()
+        delivery.keys.discard(job.key)
+        delivery.queue.task_done()
+    delivery.start()
+    await client.workspaces.message(owner, command)
+    await delivery.queue.join()
+    calls = channel.send.await_args_list
+    assert len(calls) == 1
+    text = calls[0].args[0]
+    assert text.count("Session: main") == 1 and "**State:" in text
+    assert "Last observed activity" in text and "Follow-ups:" in text
+    assert ("ordinary RPC limit" in text) == (command == "!status full")
+    assert "\n-# [dca:" in text
+    assert not {"file", "files", "embed", "embeds"} & calls[0].kwargs.keys()

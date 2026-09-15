@@ -63,7 +63,7 @@ def test_inline_pages_preserve_unicode_and_discord_limit(content):
     assert "".join(page.text for page in parts) == content
     for page in parts:
         assert len(page.content.encode("utf-16-le")) // 2 <= INLINE_UNITS
-        packet = f"{page.content}\n[dca:{'a' * 32}:inline:10000]"
+        packet = f"{page.content}\n-# [dca:{'a' * 32}:inline:{'b' * 16}:10000]"
         assert len(packet.encode("utf-16-le")) // 2 <= 2000
 
 
@@ -165,7 +165,10 @@ async def test_controls_only_after_details_and_expired_delivery():
     await d.queue.join()
     await d.close()
     assert len(t.controls) > 3 and t.controls == [False] * (t.sends - 1) + [True]
-    assert "".join(text for text, _ in t.payloads[:-1]) == f"Request req\n{p.method}\n{p.details}"
+    assert (
+        "".join(text for text, _ in t.payloads[:-1])
+        == f"## Approval needed\nRequest: `req`\n{p.method}\n\n{p.details}"
+    )
     assert bound == [("req", t.sends)]
     before = t.sends
     d = Delivery(t, 0.03, lambda _: False, lambda *_: False, lambda _: None)
@@ -251,8 +254,9 @@ async def test_approval_and_status_can_interrupt_long_result_delivery():
     finally:
         await d.close()
     markers = [marker for _, marker in t.payloads]
-    assert markers[0] == "[dca:large:inline:1]"
-    assert markers[1:3] == ["[dca:req:inline:1]", "[dca:req:control]"]
+    assert markers[0].startswith("[dca:large:inline:") and markers[0].endswith(":1]")
+    assert markers[1].startswith("[dca:req:inline:") and markers[1].endswith(":1]")
+    assert markers[2] == "[dca:req:control]"
     assert t.payloads[3][0] == "status reply"
     assert t.disabled == [99]
     assert (
@@ -310,3 +314,36 @@ async def test_expiration_midway_prevents_controls():
     finally:
         await d.close()
     assert t.sends == 2 and not any(t.controls) and d.failures == 1
+
+
+@pytest.mark.parametrize("legacy", [True, False])
+async def test_changed_layout_recovers_complete_text_and_same_layout_reconciles(legacy):
+    transport = Transport()
+    body = "Full source — café 😀\n" * 300
+    key = "saved-result"
+    if legacy:
+        transport.messages[f"[dca:{key}:inline:1]"] = 123  # Page sent by earlier layout.
+    else:
+        old = Delivery(transport, 1, lambda _: True, lambda *_: True, lambda _: None)
+        old.start()
+        old.text("Session: previous name\n" + body, result_id=key)
+        await old.queue.join()
+        await old.close()
+        first = next(iter(transport.messages))
+        transport.messages = {first: transport.messages[first]}  # Only a first page survived.
+        transport.payloads.clear()
+    content = "-# Session: renamed\n## Result\n" + body
+    delivered = []
+    recovery = Delivery(transport, 1, lambda _: True, lambda *_: True, delivered.append)
+    recovery.start()
+    try:
+        recovery.text(content, result_id=key)
+        await recovery.queue.join()
+        assert "".join(text for text, _ in transport.payloads) == content
+        assert delivered == [key]
+        sends = transport.sends
+        recovery.text(content, result_id=key)
+        await recovery.queue.join()
+        assert transport.sends == sends  # Unchanged content reconciles without resending.
+    finally:
+        await recovery.close()

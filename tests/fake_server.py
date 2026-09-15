@@ -21,6 +21,7 @@ if mode == "partial":
 if mode == "eof":
     sys.exit()
 queued = []
+active_turn = None
 for line in sys.stdin:
     request = json.loads(line)
     if "id" not in request:
@@ -41,6 +42,7 @@ for line in sys.stdin:
         "thread/start": "ThreadStartParams",
         "thread/resume": "ThreadResumeParams",
         "turn/start": "TurnStartParams",
+        "turn/steer": "TurnSteerParams",
     }
     try:
         validate(request["params"], json.loads((root / (schemas[method] + ".json")).read_text()))
@@ -52,4 +54,23 @@ for line in sys.stdin:
             flush=True,
         )
     else:
-        print(json.dumps({"id": request["id"], "result": {"accepted": True}}), flush=True)
+        if mode == "steer" and method == "turn/start":
+            active_turn = "turn-fixture"
+            result = {"turn": {"id": active_turn, "status": "inProgress"}}
+        elif mode == "steer" and method == "turn/steer":
+            if not active_turn or request["params"]["expectedTurnId"] != active_turn:
+                print(
+                    json.dumps(
+                        {
+                            "id": request["id"],
+                            "error": {"code": -32600, "message": "No matching active turn"},
+                        }
+                    ),
+                    flush=True,
+                )
+                continue
+            result = {"turnId": active_turn}
+            validate(result, json.loads((root / "TurnSteerResponse.json").read_text()))
+        else:
+            result = {"accepted": True}
+        print(json.dumps({"id": request["id"], "result": result}), flush=True)

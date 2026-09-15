@@ -36,6 +36,8 @@ class StubRpc:
         if method == "turn/start":
             self.engine.set_turn("turn-1")
             return {"turn": {"id": "turn-1", "status": "inProgress"}}
+        if method == "turn/steer":
+            return {"turnId": self.engine.turn_id}
         if method == "turn/interrupt" and self.engine.done and not self.engine.done.done():
             self.engine.done.set_result({"id": "turn-1", "status": "interrupted"})
         return {}

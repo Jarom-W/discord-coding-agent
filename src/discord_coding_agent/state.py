@@ -119,6 +119,35 @@ class StateStore:
             for record in [state.active, state.last_interruption]:
                 if record is not None and not isinstance(record, dict):
                     raise ValueError()
+                if record is not None:
+                    receipts = record.get("followups", [])
+                    accepted = record.get("followups_accepted", 0)
+                    if (
+                        not isinstance(receipts, list)
+                        or len(receipts) > 32
+                        or type(accepted) is not int
+                        or accepted < 0
+                    ):
+                        raise ValueError()
+                    for receipt in receipts:
+                        if (
+                            not isinstance(receipt, dict)
+                            or set(receipt) != {"number", "message_id", "status"}
+                            or any(
+                                type(receipt[k]) is not int or receipt[k] <= 0
+                                for k in ["number", "message_id"]
+                            )
+                            or receipt["status"]
+                            not in (
+                                "waiting",
+                                "sending",
+                                "accepted",
+                                "rejected",
+                                "uncertain",
+                                "not_submitted",
+                            )
+                        ):
+                            raise ValueError()
             for value in [state.interrupted, state.delivered]:
                 if not isinstance(value, bool):
                     raise ValueError()

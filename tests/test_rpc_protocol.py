@@ -137,3 +137,29 @@ def test_decisions_validate_against_generated_schemas():
             validate(
                 result, json.loads((FIX / (prefix + "RequestApprovalResponse.json")).read_text())
             )
+
+
+async def test_steer_schema_and_turn_precondition_over_subprocess_transport():
+    from discord_coding_agent.errors import RpcRejected
+
+    rpc, _ = await start("steer")
+    params = {
+        "threadId": "fixture",
+        "expectedTurnId": "turn-fixture",
+        "input": [{"type": "text", "text": "follow-up", "text_elements": []}],
+    }
+    try:
+        with pytest.raises(RpcRejected):
+            await rpc.call("turn/steer", params, 2)  # No active turn.
+        await rpc.call("turn/start", {"threadId": "fixture", "input": params["input"]}, 2)
+        for invalid in [
+            {k: v for k, v in params.items() if k != "expectedTurnId"},
+            {**params, "expectedTurnId": "stale-turn"},
+        ]:
+            with pytest.raises(RpcRejected):
+                await rpc.call("turn/steer", invalid, 2)
+        result = await rpc.call("turn/steer", params, 2)
+        validate(result, json.loads((FIX / "TurnSteerResponse.json").read_text()))
+        assert result == {"turnId": "turn-fixture"} and not rpc.pending
+    finally:
+        await rpc.close()

@@ -7,6 +7,7 @@ import pytest
 
 from discord_coding_agent import protocol
 from discord_coding_agent.config import Timeouts, discover_codex
+from discord_coding_agent.errors import RpcRejected
 from discord_coding_agent.rpc import Rpc
 
 
@@ -44,6 +45,24 @@ async def test_installed_initialize_create_and_resume(tmp_path, mode):
                 protocol.thread_params(repo, mode, saved),
             )
             thread = protocol.verify_thread(response, repo, mode)
+            # A real idle thread must reject steering, never implicitly start model work.
+            with pytest.raises(RpcRejected) as rejection:
+                await rpc.call(
+                    "turn/steer",
+                    {
+                        "threadId": thread,
+                        "expectedTurnId": "no-active-turn",
+                        "input": [
+                            {
+                                "type": "text",
+                                "text": "Non-model steering probe.",
+                                "text_elements": [],
+                            }
+                        ],
+                    },
+                )
+            assert rejection.value.code != -32601  # Method exists in this CLI.
+            assert not rpc.failure
             if restart:
                 assert thread == saved
             else:

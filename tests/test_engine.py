@@ -27,9 +27,10 @@ async def test_atomic_exclusivity_and_dedup(engine, owner):
         e.message(owner, "duplicate"),
         e.message(replace(owner, message=101), "second"),
     )
-    await asyncio.sleep(0)
+    await e.followups.worker
     assert len([c for c in rpc.calls if c[0] == "turn/start"]) == 1
-    assert sum("NOT submitted" in text for text, _ in sink.texts) == 1
+    assert len([c for c in rpc.calls if c[0] == "turn/steer"]) == 1
+    assert e.followups.accepted == 1
     assert len(e.state.seen_messages) == 2
     complete(e)
     await e.worker

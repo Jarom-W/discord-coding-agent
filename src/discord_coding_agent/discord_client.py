@@ -59,7 +59,7 @@ class DiscordTransport:
             )
         kwargs: dict[str, Any] = {"allowed_mentions": discord.AllowedMentions.none(), "view": view}
         try:
-            message = await channel.send(f"{text}\n{marker}", **kwargs)
+            message = await channel.send(f"{text}\n-# {marker}", **kwargs)
             return message.id
         except discord.HTTPException as exc:
             if exc.status >= 500 or exc.status == 429:

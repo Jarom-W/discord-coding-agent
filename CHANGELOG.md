@@ -1,5 +1,13 @@
 # Release notes
 
+## 0.3.0 — 2026-09-15
+
+Ordinary messages sent in the active channel now add instructions to the same Codex turn through `turn/steer`. Startup follow-ups wait in a bounded memory buffer; receipts distinguish received, accepted, rejected and uncertain input. Ordering, owner/channel authorization, message deduplication, original deadlines and one active coding task are retained. Completion/stop/restart never replay input or turn it into independent queued tasks. Other channels' busy messages and active session/mode/`!run` changes remain rejected.
+
+Discord help is grouped by purpose. Status combines channel/task information into a compact view; `!status full` adds preparation budgets and interrupted follow-up metadata. Task/result/approval headings and small session/delivery labels improve scanning. Every reply remains inline, with the same complete Unicode/code pagination and no attachment or embed dependency. Page fingerprints prevent partial-reply recovery from skipping content after label/layout changes; a changed layout can repeat earlier pages. No additional Discord permissions are needed.
+
+No Codex upgrade, configuration/state-schema change or updater-protocol change is required. New input metadata fits inside existing task records; credentials and saved sessions remain in place. Follow-up semantics and the live acceptance procedure are in [chat controls](docs/chat.md). Validation and live-test limits are recorded in [compatibility](docs/compatibility.md).
+
 ## 0.2.5 — 2026-09-10
 
 Fixed readiness remaining false after a successful Discord Gateway resume. The bridge previously cleared readiness on disconnect but only restored it on `READY`; discord.py dispatches `RESUMED` when an existing session reconnects successfully. A bot could therefore respond in Discord while CD refused to update it. Both events now share channel validation, connection-state restoration and pending-delivery recovery. Active tasks/approvals survive the reconnect, submitted coding work is not replayed, and late Gateway events cannot restore readiness during shutdown.

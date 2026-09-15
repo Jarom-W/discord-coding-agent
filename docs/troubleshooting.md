@@ -1,6 +1,6 @@
 # Troubleshooting and safe recovery
 
-Start with `!ping`, `!status`, and `!last` in the configured channel. On the Pi, run from the bridge directory:
+Start with `!ping`, `!status full`, and `!last` in the configured channel. On the Pi, run from the bridge directory:
 
 ```bash
 .venv/bin/discord-coding-agent doctor
@@ -20,6 +20,9 @@ journalctl --user -u discord-coding-agent.service -n 200 --no-pager -o short-iso
 | Em dashes or other Unicode look garbled | Inline replies preserve Unicode. Use `!last` for a fresh chat copy of a saved result. If a new message is garbled, report the running bridge version and a short non-sensitive example. |
 | Wrong/stale repository or chat | Use `!status`, `!sessions`, `!session NAME` or `!repo PATH` in that channel. Only bridge commands change routing; follow [workspace setup](workspaces.md). |
 | Directory outside roots / non-Git folder | `!dirs` lists allowed host roots. Configure `WORKSPACE_ROOTS` locally (including the initial repo), then restart idle. Selection requires an existing Git working-tree root; create/clone it locally first. Symlink escapes are refused. |
+| Follow-up received but not accepted yet | Startup may still be running or an earlier follow-up awaits acknowledgement. Use `!status full`. A receipt is not proof Codex has seen the input. Maximum eight waiting/in-flight messages; excess messages are explicitly not submitted. |
+| Follow-up acceptance unknown / turn ended | Do not resend blindly. The input may already have reached Codex. Read the final result/`!last`, review the repository, and decide how to continue. Healthy original work continues after a steer-only timeout; remaining unsent input is discarded. `!stop` remains available. |
+| Follow-up unsupported/rejected | Run `doctor` and check the configured CLI baseline. The bridge does not start a second turn as a fallback. Wait for completion or use `!stop`, inspect the result, then explicitly send a new task. See [chat controls](chat.md). |
 | Busy in another channel | `!status` reports the active coding channel. Work is serialized across the bot; the rejected message was not submitted. Wait, or `!stop` from a bound channel. Selection changes also wait during deployment. |
 | Old saved repository identity | Restore its original Git directory or deliberately start a new session with `!repo --fresh PATH`. Old history is preserved and never silently rebound to replacement files. |
 | Update does not arrive / failed deployment | Check `deploy status`, main's exact `ci.yml` push run, timer/user-bus/linger, bot readiness and updater journal. See [deployment troubleshooting](deployment.md). PR success alone is insufficient; active tasks defer restarts. |
@@ -33,7 +36,7 @@ journalctl --user -u discord-coding-agent.service -n 200 --no-pager -o short-iso
 | Typing indicator disappears or fails | Cosmetic HTTP errors are isolated. Use last observed activity and task phase; typing is not proof of progress. |
 | Quiet logs | No idle-read timeout is imposed. A long tool/model call may be quiet. Inspect event age, Pi resources and explicit deadline; use `!stop` if you decide to interrupt. |
 | Timeout | Read the named operation and actual seconds. Initialization, RPC, partial transport frame, whole task, human wait, delivery and shutdown are different limits. See [reference](reference.md). Adjust the right TOML field and restart while idle. A request timeout may follow completed edits: never blindly resend. |
-| Thread start/resume times out despite an unlimited task | `!run unlimited` does not disable startup checks. Inspect the preparation step and initialization budget in `!status`; see [slow conversation startup](#slow-conversation-startup) below. |
+| Thread start/resume times out despite an unlimited task | `!run unlimited` does not disable startup checks. Inspect the preparation step and initialization budget in `!status full`; see [slow conversation startup](#slow-conversation-startup) below. |
 | Still stops after one hour | Check `!status` and the private `[timeouts]` table. Set an explicit `task = 3600` to `task = 0` and restart while idle. `!run unlimited task text` overrides the default for one new task. Codex can still complete/fail earlier; this does not override account limits. |
 | Authentication error | Run the same configured executable's `login status` as the service user. Complete headless login locally; confirm service HOME/Codex authentication location and managed account requirements. Do not copy caches into Discord. |
 | Rate/usage limit | Check your Codex/account usage and service status through official account tools. Wait or adjust workload/auth plan as appropriate. Subscription coverage and limits are not guaranteed. The bridge does not loop-replay a failed turn. |
@@ -79,7 +82,7 @@ If readiness still fails, inspect `gateway=configuration_error` / `permissions_m
 
 Codex [resumes a stored thread before a later `turn/start` submits new input](https://developers.openai.com/codex/app-server). A simple question can therefore fail during conversation loading, before Codex sees it. The bridge’s initialization budget covers this loading alongside the other preparation steps. A timeout alone does not establish whether the delay came from history loading, host resources, network access or configured integrations.
 
-1. **In Discord:** read `!status` and record the session/thread, preparation step, timeout type/limit and task ID. Keep that session selected; a new conversation is not required merely to increase its startup budget.
+1. **In Discord:** read `!status full` and record the session/thread, preparation step, timeout type/limit and task ID. Keep that session selected; a new conversation is not required merely to increase its startup budget.
 2. **On the Pi:** collect the journal and `doctor --probe` output using the commands at the top of this guide. A successful probe checks handshake/config/account access; it does **not** resume the selected conversation or prove that its tools can start.
 3. If startup is progressing but needs more time, edit **the existing `[timeouts]` table** in private config, for example `initialization = 180`, then restart while idle. The full-task setting can stay `task = 0`; ordinary request timeouts remain separate. A larger budget will not repair a permanently stalled process or unavailable dependency.
 4. After resolving the cause, send an explicit continuation. No failed prompt is automatically replayed. If the failed operation was `turn/start`, the prompt may already have been accepted: inspect repository status/diffs and any external effects first.

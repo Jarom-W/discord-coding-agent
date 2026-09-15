@@ -21,15 +21,13 @@ from .state import StateStore, atomic_write, backup
 
 MAX_CHANNELS = 8
 MAX_SESSIONS = 64
-WORKSPACE_HELP = """Channel workspaces (one owner/server; one coding task across all channels):
-!dirs [PATH] — list directories under WORKSPACE_ROOTS; omit PATH to list the roots
-!repo PATH — select an existing Git repository in this channel; spaces in paths are allowed
-!sessions — list this channel's saved sessions, repositories and modes
-!session NAME — return to a saved session and its repository
-!name NAME — rename the selected session (names can contain spaces)
-!new [auto|manual] [NAME] — create a saved session in the selected repository; old sessions remain available
-!status — includes this channel's selection and any task running in another channel
-!stop — interrupt the active coding task, including one in another channel
+WORKSPACE_HELP = """## Repositories and saved sessions
+`!dirs [PATH]` — list directories under WORKSPACE_ROOTS; omit PATH to list the roots
+`!repo PATH` — select an existing Git repository in this channel; spaces in paths are allowed
+`!sessions` — list this channel's saved sessions, repositories and modes
+`!session NAME` — return to a saved session and its repository
+`!name NAME` — rename the selected session (names can contain spaces)
+`!new [auto|manual] [NAME]` — create a saved session in the selected repository; old sessions remain available
 In another private text channel in the same server, grant this bot access and send !repo PATH. No new bot/token is needed.
 Repository/session changes are idle-only. Attachments are unsupported. Names are local to a channel; saved Codex history is not deleted.
 """
@@ -62,7 +60,8 @@ class SessionSink:
         return str(getattr(self.sink, "status", ""))
 
     def text(self, content: str, *, result_id: str | None = None) -> None:
-        self.sink.text(f"Session: {self.record.name}\n{content}", result_id=result_id)
+        heading = "## Result\n" if result_id else ""
+        self.sink.text(f"-# Session: {self.record.name}\n{heading}{content}", result_id=result_id)
 
     def request(self, pending: Pending) -> None:
         self.sink.request(pending)
@@ -442,7 +441,7 @@ class Workspaces:
                     f"{cmd} takes no arguments; use !session NAME to select a session."
                 )
             if cmd == "!help":
-                sink.text(WORKSPACE_HELP + "\n" + HELP)
+                sink.text(HELP + "\n\n" + WORKSPACE_HELP)
             elif cmd == "!dirs":
                 sink.text(
                     await asyncio.wait_for(
@@ -484,10 +483,15 @@ class Workspaces:
                     engine = self.engine(selected)
                     if cmd == "!status":
                         active = self.active()
+                        if argument.lower() not in {"", "full"}:
+                            raise BridgeError("Use !status or !status full.")
                         sink.text(
-                            f"Channel session: {selected.name}\nRepository: {selected.repo}\nActive coding channel: {active.config.channel_id if active else 'none'}"
+                            f"### Session: {selected.name}\nRepository: {selected.repo}\n"
+                            f"Active coding channel: {active.config.channel_id if active else 'none'}\n\n"
+                            + engine.status(detailed=bool(argument))
                         )
-                    await engine.message(origin, content, attachments)
+                    else:
+                        await engine.message(origin, content, attachments)
         except (BridgeError, OSError, TimeoutError) as exc:
             sink.text(
                 str(exc)

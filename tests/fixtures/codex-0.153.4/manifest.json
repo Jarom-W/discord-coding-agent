@@ -15,6 +15,15 @@
     "PermissionsRequestApprovalParams.json": "c6d165e1b0c65d5dcf1e099b4c226c7e4dad79fe2b88b03621a1fc6c1d3c86c2",
     "PermissionsRequestApprovalResponse.json": "23f3f24e9dbf35db3e0b85703f0d934da5a1cff3cbb611fba8bcd41f3b4a04b0",
     "ConfigReadParams.json": "257c54a423b47c1d209ff1076765a1564d82322fd5161670fd489a2874de1bac",
-    "ItemGuardianApprovalReviewCompletedNotification.json": "bcf94662d3589c36ac3a13c0d919fa33c2b85f452d5098a8093360884d768a02"
+    "ItemGuardianApprovalReviewCompletedNotification.json": "bcf94662d3589c36ac3a13c0d919fa33c2b85f452d5098a8093360884d768a02",
+    "TurnSteerParams.json": "2e0cdcea6a90d6c8bc584fdc2ff838e824754b1eef0d2d16aa71bec4276fef44",
+    "TurnSteerResponse.json": "866ba9a77c12b5d570c837d58f73bf40b24e50fa93404bdf792dd984d313b1aa"
+  },
+  "verified": "2026-09-14",
+  "additional_capture": {
+    "2026-09-14": [
+      "TurnSteerParams.json",
+      "TurnSteerResponse.json"
+    ]
   }
 }

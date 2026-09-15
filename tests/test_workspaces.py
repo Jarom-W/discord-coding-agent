@@ -250,3 +250,19 @@ async def test_unbound_ordinary_text_is_ignored(spaces, owner):
     w, sinks, _ = spaces
     await w.message(replace(owner, channel=999), "normal server conversation")
     assert 999 not in w.channels and not sinks
+
+
+async def test_active_channel_followup_is_routed_without_cross_channel_steering(spaces, owner):
+    w, sinks, second = spaces
+    await w.message(replace(owner, message=90, channel=44), f"!repo {second}")
+    e, rpc = stub(w, w.selected(33))
+    other, other_rpc = stub(w, w.selected(44))
+    await w.message(owner, "work here")
+    await w.message(replace(owner, message=101), "add this here")
+    await w.message(replace(owner, message=101), "duplicate")
+    await w.message(replace(owner, message=102, channel=44), "must not reach active repo")
+    await e.followups.worker
+    assert e.followups.accepted == 1
+    assert not other.busy and not other_rpc.calls
+    assert "NOT submitted" in sinks[44].texts[-1][0]
+    assert [m for m, _ in rpc.calls] == ["turn/start", "turn/steer"]
