@@ -13,8 +13,28 @@ from discord_coding_agent import deployment
 from discord_coding_agent.delivery import Delivery
 from discord_coding_agent.discord_client import BridgeClient, DiscordTransport
 from discord_coding_agent.engine import HELP, Origin, Pending
+from discord_coding_agent.errors import BridgeError
 from discord_coding_agent.state import StateStore
 from discord_coding_agent.workspaces import WORKSPACE_HELP
+
+
+@pytest.mark.parametrize("status", [429, 500, 503, 403, 404])
+async def test_history_http_errors_are_classified_without_response_bodies(status):
+    async def history(**kwargs):
+        assert kwargs == {"limit": 100}
+        raise discord.HTTPException(
+            SimpleNamespace(status=status, reason="private response"), "secret server body"
+        )
+        yield  # Async iterator, matching discord.py's history interface.
+
+    transport = DiscordTransport(SimpleNamespace())
+    transport.channel = AsyncMock(return_value=SimpleNamespace(history=history))
+    expected = OSError if status == 429 or status >= 500 else BridgeError
+    with pytest.raises(expected) as failure:
+        await transport.find("marker")
+    assert "secret" not in str(failure.value) and "private" not in str(failure.value)
+    if expected is BridgeError:
+        assert "Read Message History" in str(failure.value)
 
 
 async def test_large_result_reaches_discord_inline_with_unicode_and_no_files():

@@ -118,6 +118,9 @@ class Rpc:
                 # No idle-read timeout: quiet model/tool execution is legitimate.
                 first = await reader.read(1)
                 if not first:
+                    if self.closing:
+                        log.info("transport=closed reason=owned_shutdown")
+                        return
                     raise BridgeError(
                         "Codex stdout disconnected. Inspect authentication and process logs; no task was replayed."
                     )

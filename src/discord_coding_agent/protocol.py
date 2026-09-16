@@ -6,6 +6,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from . import __version__
 from .errors import BridgeError, LimitError
 from .rpc import Rpc
 
@@ -81,7 +82,7 @@ async def initialize(rpc: Rpc) -> None:
             "clientInfo": {
                 "name": "discord_coding_agent",
                 "title": "Discord Coding Agent (community)",
-                "version": "0.2.3",
+                "version": __version__,
             },
             "capabilities": {"experimentalApi": True, "optOutNotificationMethods": OPT_OUT},
         },
