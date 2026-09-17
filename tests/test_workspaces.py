@@ -3,6 +3,7 @@ import json
 import subprocess
 from collections import defaultdict
 from dataclasses import replace
+from unittest.mock import AsyncMock
 
 import pytest
 from conftest import MemorySink, StubRpc, approval, begin, complete
@@ -11,8 +12,133 @@ from discord_coding_agent.config import repository_identity
 from discord_coding_agent.engine import Origin
 from discord_coding_agent.errors import BridgeError
 from discord_coding_agent.locks import Lease
+from discord_coding_agent.models import Model
 from discord_coding_agent.state import StateStore
 from discord_coding_agent.workspaces import Workspaces
+
+
+@pytest.fixture
+def catalog(monkeypatch):
+    lookup = AsyncMock(
+        return_value=[Model("model-a", "Model A", True), Model("model-b", "Model B", False)]
+    )
+    monkeypatch.setattr("discord_coding_agent.workspaces.discover_models", lookup)
+    return lookup
+
+
+async def test_model_selection_keeps_history_and_isolated_across_sessions_restart(
+    spaces, owner, catalog
+):
+    w, sinks, second = spaces
+    first = w.selected(owner.channel)
+    engine = w.engine(first)
+    engine.state.thread_id = "original-thread"
+    engine.state.last_result = "saved result"
+    await w.message(owner, "!models")
+    assert "model-a" in sinks[33].texts[-1][0] and "catalog default" in sinks[33].texts[-1][0]
+    await w.message(replace(owner, message=101), "!model model-b")
+    assert engine.store.load().model == "model-b"
+    assert (
+        engine.state.thread_id == "original-thread" and engine.state.last_result == "saved result"
+    )
+    assert "model-b" in engine.status()
+    await w.message(replace(owner, message=102), "!model")
+    assert "model-b" in sinks[33].texts[-1][0]
+    assert catalog.await_count == 2
+    await w.switch(33, "!new", "new session")
+    assert w.engine(w.selected(33)).state.model is None
+    await w.switch(44, "!repo", str(second))
+    assert w.engine(w.selected(44)).state.model is None
+    await w.switch(33, "!session", first.name)
+    await w.close()
+    restored = Workspaces(w.config, w.legacy, lambda channel: sinks[channel])
+    assert restored.engine(restored.selected(33)).state.model == "model-b"
+    assert restored.engine(restored.selected(44)).state.model is None
+    await restored.close()
+
+
+@pytest.mark.parametrize("argument", ["unknown", "two words", "`bad`", "x" * 201])
+async def test_invalid_model_preserves_selection(spaces, owner, catalog, argument):
+    w, _, _ = spaces
+    engine = w.engine(w.selected(33))
+    engine.state.model = "model-a"
+    engine.save()
+    with pytest.raises(BridgeError):
+        await w.model_command(owner, "model", argument)
+    assert engine.store.load().model == "model-a"
+
+
+async def test_model_change_rejects_busy_other_channel_but_listing_works(spaces, owner, catalog):
+    w, _, second = spaces
+    await w.switch(44, "!repo", str(second))
+    engine, _ = stub(w, w.selected(44))
+    await begin(engine, replace(owner, channel=44))
+    with pytest.raises(BridgeError, match="active work"):
+        await w.model_command(owner, "model", "model-a")
+    assert "model-b" in await w.model_command(owner, "models")
+    complete(engine)
+    await engine.worker
+
+
+async def test_model_change_reserves_workspace_during_lookup(spaces, owner, monkeypatch):
+    w, _, _ = spaces
+    arrived, release = asyncio.Event(), asyncio.Event()
+
+    async def lookup(*_):
+        arrived.set()
+        await release.wait()
+        return [Model("model-a", "A", True)]
+
+    monkeypatch.setattr("discord_coding_agent.workspaces.discover_models", lookup)
+    task = asyncio.create_task(w.model_command(owner, "model", "model-a"))
+    await arrived.wait()
+    try:
+        with pytest.raises(BridgeError, match="active work or maintenance"):
+            await w.switch(33, "!new", "other")
+        with pytest.raises(BridgeError, match="already in progress"):
+            await w.model_command(owner, "models")
+        engine, rpc = stub(w, w.selected(33))
+        await w.message(owner, "start a task")
+        assert not engine.busy and not rpc.calls
+    finally:
+        release.set()
+        await task
+    lease = Lease(w.activity_path)
+    assert lease.acquire()
+    lease.close()
+
+
+async def test_model_failures_keep_previous_choice_and_release_lease(
+    spaces, owner, catalog, monkeypatch
+):
+    w, _, _ = spaces
+    engine = w.engine(w.selected(33))
+    engine.state.model = "model-a"
+    engine.save()
+    catalog.side_effect = BridgeError("lookup unavailable")
+    with pytest.raises(BridgeError, match="lookup unavailable"):
+        await w.model_command(owner, "model", "model-b")
+    catalog.side_effect = None
+    monkeypatch.setattr(engine, "save", lambda: (_ for _ in ()).throw(OSError("disk full")))
+    with pytest.raises(OSError, match="disk full"):
+        await w.model_command(owner, "model", "model-b")
+    assert engine.state.model == engine.store.load().model == "model-a"
+    lease = Lease(w.activity_path)
+    assert lease.acquire()
+    lease.close()
+
+
+async def test_model_connection_only_and_unbound_channel_no_lookup(spaces, owner, catalog):
+    w, _, _ = spaces
+    with pytest.raises(BridgeError, match="repository"):
+        await w.model_command(replace(owner, channel=44), "models")
+    with pytest.raises(BridgeError, match="owner"):
+        await w.model_command(replace(owner, owner=99), "models")
+    w.connection_only = True
+    with pytest.raises(BridgeError, match="Connection-only"):
+        await w.model_command(owner, "models")
+    assert "Codex default" in await w.model_command(owner, "model")
+    catalog.assert_not_awaited()
 
 
 @pytest.fixture

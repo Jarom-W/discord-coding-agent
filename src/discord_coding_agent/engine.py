@@ -31,6 +31,12 @@ Send ordinary text to start or continue this channel's saved conversation. Send 
 `!stop` — interrupt work; does not undo completed edits or external effects
 `!last` — retrieve the last saved result, inline
 
+## Models
+`/models` — list available Codex models
+`/model [MODEL]` — show or change this session's model; changes require idle work
+`!models` / `!model [MODEL]` — equivalent text commands
+Selections survive restart and apply to the next task, keeping conversation history. New sessions use Codex defaults.
+
 ## Time limits
 `!run 30m task text` — enforce a limit for a new task (s/m/h, e.g. 90s or 1.5h)
 `!run unlimited task text` — no deadline for that new task
@@ -335,6 +341,7 @@ class Engine:
         text = (
             f"**State: {self.phase}** · Gateway: {'connected' if self.connected else 'disconnected'}\n"
             f"**Mode:** {self.state.mode} · verified: {self.verified}\n"
+            f"**Model:** {self.state.model or 'Codex default (configured or saved thread model)'}\n"
             f"**Elapsed:** {elapsed} · {'Active' if self.busy else 'Default'} task limit: "
             f"{describe_task_limit(self.task_limit if self.busy else self.config.timeouts.task)}\n"
             f"**Last observed activity:** {self.last_event} ({age})\n"
@@ -434,13 +441,17 @@ class Engine:
         self.preparing(method)
         response = await rpc.call(
             method,
-            protocol.thread_params(self.config.repo, self.state.mode, self.state.thread_id),
+            protocol.thread_params(
+                self.config.repo, self.state.mode, self.state.thread_id, self.state.model
+            ),
             # Thread loading is preparation, not an ordinary 45-second RPC. The
             # outer initialization timer bounds ALL preparation stages together.
             self.config.timeouts.initialization,
         )
         self.preparing("thread verification")
-        thread_id = protocol.verify_thread(response, self.config.repo, self.state.mode)
+        thread_id = protocol.verify_thread(
+            response, self.config.repo, self.state.mode, self.state.model
+        )
         if self.state.thread_id and thread_id != self.state.thread_id:
             raise BridgeError(
                 "Resume returned a different thread ID; no turn submitted. Inspect Codex state."

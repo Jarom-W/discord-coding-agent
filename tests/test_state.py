@@ -42,6 +42,25 @@ def test_corrupt_state_preserved(tmp_path, text):
     assert store.path.read_text() == text
 
 
+def test_legacy_state_without_model_loads_and_retains_history(tmp_path):
+    store = StateStore(tmp_path, "repo", "manual")
+    atomic_write(
+        store.path, json.dumps({"schema": 1, "repo_identity": "repo", "thread_id": "old-thread"})
+    )
+    state = store.load()
+    assert state.model is None and state.thread_id == "old-thread"
+
+
+@pytest.mark.parametrize("model", ["", 1, False, "two words", "bad\nmodel", "x" * 201])
+def test_invalid_saved_model_preserved(tmp_path, model):
+    store = StateStore(tmp_path, "repo", "manual")
+    store.save(State("repo", model=model))
+    before = store.path.read_bytes()
+    with pytest.raises(BridgeError, match="corrupt"):
+        store.load()
+    assert store.path.read_bytes() == before
+
+
 def test_repository_mismatch_and_unknown_schema_backup(tmp_path):
     store = StateStore(tmp_path, "repo", "manual")
     store.save(State("other"))

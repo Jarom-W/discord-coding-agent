@@ -18,6 +18,99 @@ from discord_coding_agent.state import StateStore
 from discord_coding_agent.workspaces import WORKSPACE_HELP
 
 
+def model_interaction(client, guild, channel, command="models", model=None):
+    return SimpleNamespace(
+        id=1234,
+        data={
+            "name": command,
+            "guild_id": str(guild.id),
+            "type": 1,
+            "options": [] if model is None else [{"name": "model", "type": 3, "value": model}],
+        },
+        type=discord.InteractionType.application_command,
+        command_failed=False,
+        response=SimpleNamespace(defer=AsyncMock()),
+        user=SimpleNamespace(id=client.config.owner_id),
+        guild=guild,
+        guild_id=guild.id,
+        channel=channel,
+        channel_id=client.config.channel_id,
+        followup=SimpleNamespace(send=AsyncMock()),
+        _state=client._connection,
+    )
+
+
+@pytest.mark.parametrize(
+    "command, model", [("models", None), ("model", None), ("model", "chosen-model")]
+)
+async def test_native_slash_dispatch_defers_and_routes_selection(connected_client, command, model):
+    client, guild, channel = connected_client
+    interaction = model_interaction(client, guild, channel, command, model)
+
+    async def command_handler(origin, name, argument):
+        interaction.response.defer.assert_awaited_once_with(ephemeral=True, thinking=True)
+        assert (origin.owner, origin.guild, origin.channel, origin.message) == (11, 22, 33, 1234)
+        assert name == command and argument == (model or "")
+        return "Available models — 😀 @everyone\n" * 150
+
+    client.workspaces.model_command = AsyncMock(side_effect=command_handler)
+    assert client.tree.get_commands() == []  # Registered only in the configured guild.
+    assert {c.name for c in client.tree.get_commands(guild=discord.Object(id=22))} == {
+        "models",
+        "model",
+    }
+    await client.tree._call(interaction)
+    client.workspaces.model_command.assert_awaited_once()
+    assert len(interaction.followup.send.await_args_list) > 1
+    for call in interaction.followup.send.await_args_list:
+        assert len(call.args[0].encode("utf-16-le")) // 2 <= 2000
+        assert call.kwargs["ephemeral"] and not call.kwargs["allowed_mentions"].everyone
+
+
+@pytest.mark.parametrize("invalid", ["owner", "guild", "dm", "thread", "news", "permissions"])
+async def test_slash_authorization_rejects_before_lookup(connected_client, invalid):
+    client, guild, channel = connected_client
+    interaction = model_interaction(client, guild, channel)
+    if invalid == "owner":
+        interaction.user.id = 99
+    elif invalid == "guild":
+        interaction.guild_id = 99
+    elif invalid == "dm":
+        interaction.guild_id = interaction.guild = None
+    elif invalid == "thread":
+        interaction.channel = MagicMock(spec=discord.Thread)
+    elif invalid == "news":
+        channel.type = discord.ChannelType.news
+    else:
+        channel.permissions_for.return_value.send_messages = False
+    client.workspaces.model_command = AsyncMock()
+    await client.model_interaction(interaction, "models")
+    client.workspaces.model_command.assert_not_awaited()
+    interaction.followup.send.assert_awaited_once()
+
+
+@pytest.mark.parametrize("failed", [False, "http", "timeout"])
+async def test_setup_registers_guild_commands_with_prefix_fallback(config, tmp_path, failed):
+    client = BridgeClient(config, StateStore(tmp_path / "adapter-state", "identity", "manual"))
+    client.tree.sync = AsyncMock()
+    if failed == "http":
+        client.tree.sync.side_effect = discord.Forbidden(
+            SimpleNamespace(status=403, reason="Forbidden"), "private body"
+        )
+    elif failed == "timeout":
+        client.tree.sync.side_effect = TimeoutError()
+    client.delivery.start = MagicMock()
+    client.delivery.text = MagicMock()
+    try:
+        await client.setup_hook()
+        assert client.tree.sync.call_args.kwargs["guild"].id == config.guild_id
+        client.delivery.start.assert_called_once()
+        if failed:
+            assert "!models" in client.delivery.text.call_args.args[0]
+    finally:
+        await client.close()
+
+
 @pytest.mark.parametrize("status", [429, 500, 503, 403, 404])
 async def test_history_http_errors_are_classified_without_response_bodies(status):
     async def history(**kwargs):

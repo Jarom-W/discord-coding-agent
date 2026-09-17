@@ -1,5 +1,11 @@
 # Release notes
 
+## Unreleased
+
+Added owner-only `/models` and `/model [MODEL]` slash commands, with `!models` and `!model` aliases. Available models come from Codex's paginated catalog. Each saved session retains its selected model across restarts; idle-only changes keep the conversation history and are verified before the next task. `/model` and `!status` show the selection. New sessions continue to use Codex defaults.
+
+The bridge now registers the two slash commands in its configured server at startup. Check the `applications.commands` installation scope if they are missing; prefix aliases work if registration fails. This adds an optional `model` field to saved session state. Before manually rolling back to a release that predates this field, preserve current state and restore the matching pre-update state backup (the managed updater keeps these backups).
+
 ## 0.3.1 — 2026-09-15
 
 Task failures are now saved before Discord delivery and shown in `!status full`, including after restart. Preparation failures distinguish prompts not submitted from attempted turns with uncertain acceptance/effects. The previous completed result stays available through `!last`. Idle status no longer displays the finished task's closed follow-up buffer as if it governed future input; an explicit fresh message can reuse the same conversation after a failure.

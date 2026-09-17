@@ -1,4 +1,4 @@
-"""discord.py Gateway adapter. No inbound server or slash command registration."""
+"""discord.py Gateway adapter with guild-scoped model slash commands."""
 
 import asyncio
 import json
@@ -7,10 +7,11 @@ import os
 from typing import Any
 
 import discord
+from discord import app_commands
 
 from . import protocol, runtime
 from .config import Config
-from .delivery import Delivery
+from .delivery import Delivery, payloads
 from .engine import Engine, Origin, Pending
 from .errors import BridgeError, log_error
 from .state import StateStore, atomic_write
@@ -111,6 +112,24 @@ class BridgeClient(discord.Client):
             intents=intents, allowed_mentions=discord.AllowedMentions.none(), max_messages=128
         )
         self.config = config
+        self.tree = app_commands.CommandTree(self)
+        guild = discord.Object(id=config.guild_id)
+        self.tree.add_command(
+            app_commands.Command(
+                name="models",
+                description="List available Codex models",
+                callback=self.models_command,
+            ),
+            guild=guild,
+        )
+        self.tree.add_command(
+            app_commands.Command(
+                name="model",
+                description="Show or change this session's model",
+                callback=self.model_command,
+            ),
+            guild=guild,
+        )
         self.runtime = runtime.current()
         self.store = store
         self.deliveries: dict[int, Delivery] = {}
@@ -175,6 +194,16 @@ class BridgeClient(discord.Client):
         return self.deliveries[channel]
 
     async def setup_hook(self) -> None:
+        try:
+            await asyncio.wait_for(
+                self.tree.sync(guild=discord.Object(id=self.config.guild_id)),
+                self.config.timeouts.delivery,
+            )
+        except (discord.HTTPException, OSError, TimeoutError) as exc:
+            log_error(log, "discord-command-sync", exc)
+            self.delivery.text(
+                "Model slash commands could not be registered. Use !models / !model, and check the bot's applications.commands installation scope."
+            )
         self.delivery_started = True
         for delivery in self.deliveries.values():
             delivery.start()
@@ -315,6 +344,71 @@ class BridgeClient(discord.Client):
                 ).text(
                     "Bridge could not safely process this message. Inspect the journal and !status before retrying."
                 )
+
+    async def models_command(self, interaction: discord.Interaction[Any]) -> None:
+        await self.model_interaction(interaction, "models")
+
+    @app_commands.describe(model="Exact model ID from /models; omit to show the current selection")
+    async def model_command(
+        self, interaction: discord.Interaction[Any], model: str | None = None
+    ) -> None:
+        await self.model_interaction(
+            interaction, "model", model.strip() if model is not None else ""
+        )
+
+    async def model_interaction(
+        self, interaction: discord.Interaction[Any], command: str, argument: str = ""
+    ) -> None:
+        try:
+            await asyncio.wait_for(interaction.response.defer(ephemeral=True, thinking=True), 2)
+            origin = Origin(
+                interaction.user.id,
+                interaction.guild_id,
+                interaction.channel_id or 0,
+                interaction.id,
+            )
+            channel = interaction.channel
+            guild = interaction.guild
+            try:
+                if not self.workspaces.permitted(origin):
+                    raise BridgeError(
+                        "Only the configured owner can use model commands in this server."
+                    )
+                if (
+                    not isinstance(channel, discord.TextChannel)
+                    or channel.type != discord.ChannelType.text
+                    or not guild
+                    or not guild.me
+                    or channel.guild.id != self.config.guild_id
+                ):
+                    raise BridgeError(
+                        "Use model commands in a server text channel bound with !repo PATH."
+                    )
+                permissions = channel.permissions_for(guild.me)
+                if not all(
+                    getattr(permissions, name)
+                    for name in ["view_channel", "send_messages", "read_message_history"]
+                ):
+                    raise BridgeError(
+                        "Check the bot's View Channel, Send Messages and Read Message History permissions in this channel."
+                    )
+                answer = await self.workspaces.model_command(origin, command, argument)
+            except BridgeError as exc:
+                answer = str(exc)
+            except Exception as exc:
+                log_error(log, "discord-model-command", exc)
+                answer = "Model command failed. Check /model and the journal before retrying."
+            for page in payloads(answer):
+                await asyncio.wait_for(
+                    interaction.followup.send(
+                        page.content,
+                        ephemeral=True,
+                        allowed_mentions=discord.AllowedMentions.none(),
+                    ),
+                    self.config.timeouts.delivery,
+                )
+        except Exception as exc:
+            log_error(log, "discord-model-interaction", exc)
 
     async def on_interaction(self, interaction: discord.Interaction[Any]) -> None:
         data: Any = interaction.data or {}
