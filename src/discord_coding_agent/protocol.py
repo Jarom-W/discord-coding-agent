@@ -107,7 +107,9 @@ async def verify_process(rpc: Rpc, repo: Path, mode: str) -> None:
         )
 
 
-def thread_params(repo: Path, mode: str, thread_id: str | None = None) -> dict[str, Any]:
+def thread_params(
+    repo: Path, mode: str, thread_id: str | None = None, model: str | None = None
+) -> dict[str, Any]:
     params: dict[str, Any] = {
         "cwd": str(repo),
         "approvalPolicy": "on-request",
@@ -116,10 +118,12 @@ def thread_params(repo: Path, mode: str, thread_id: str | None = None) -> dict[s
     }
     if thread_id:
         params.update(threadId=thread_id, excludeTurns=True)
+    if model is not None:
+        params["model"] = model
     return params
 
 
-def verify_thread(response: dict[str, Any], repo: Path, mode: str) -> str:
+def verify_thread(response: dict[str, Any], repo: Path, mode: str, model: str | None = None) -> str:
     if (
         response.get("approvalsReviewer") != REVIEWERS[mode]
         or response.get("approvalPolicy") != "on-request"
@@ -128,6 +132,10 @@ def verify_thread(response: dict[str, Any], repo: Path, mode: str) -> str:
     ):
         raise BridgeError(
             "Effective thread reviewer, policy, sandbox or repository did not match. No turn submitted. Run doctor; !new manual is a deliberate alternative when auto is unavailable."
+        )
+    if model is not None and response.get("model") != model:
+        raise BridgeError(
+            "Codex did not select the requested model. No turn submitted. Use /models and /model to select an available model."
         )
     thread_id = response.get("thread", {}).get("id")
     if not isinstance(thread_id, str) or not thread_id:

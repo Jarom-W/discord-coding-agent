@@ -10,6 +10,8 @@ Only the configured owner in the configured server can invoke commands. The init
 | `!ping` | Receive/send connectivity check with the running bridge version, managed release revision when available, and reply format; no Codex or model call. |
 | `!status` | Running bridge version/revision/reply format, task phase, Gateway state, thread, selected mode, last verification, elapsed time, last observed activity and age, pending IDs, follow-up counts, interruption and delivery status. Shows the preparation step while initializing. |
 | `!status full` | Add initialization/RPC budgets, task ID, last saved task failure and any interrupted follow-up metadata. |
+| `/models` or `!models` | List the current Codex model catalog, with exact selectable IDs and the saved selection. No model turn. |
+| `/model [MODEL]` or `!model [MODEL]` | Show the saved selection, or validate and save an exact model ID for this session's next task. Changes are idle-only. |
 | `!run 30m task text` | Submit a task with a bridge-enforced deadline. Use a positive number followed by `s`, `m` or `h` (e.g. `90s`, `30m`, `1.5h`). Overrides the configured default for this task only. |
 | `!run unlimited task text` | Submit a task with no full-task deadline, overriding the configured default for this task only. |
 | `!dirs [PATH]` | List allowed workspace roots, or immediate directories under a root. No file contents/model call. |
@@ -40,6 +42,16 @@ Asking Codex in ordinary prose to start a new chat does not switch bridge routin
 `!run` uses the same conversation, authorization, deduplication and atomic reservation as ordinary text. It cannot modify the deadline of an active task: busy requests are rejected without submission. Follow-ups keep the active deadline. After completion, the next ordinary message starts a task using the configured default again. `!status` and the acceptance message show the effective deadline (or `none (unlimited)`). The full-task timer includes preparation and human wait; expiry requests interruption and then bounded process cleanup, which can take additional shutdown time. Cancellation never undoes effects.
 
 Natural-language constraints such as “only work for 30 minutes” reach Codex unchanged; the bridge does not parse or guarantee enforcement of arbitrary prose. Use `!run 30m …` for a hard timer, and include any other stopping conditions in the task text. A completed turn ends the task even with no deadline. The bridge does not repeatedly prompt the model to manufacture more work. Requests requiring oversight still wait for your decision under the separate `user_wait` policy.
+
+## Model selection
+
+Run `/models`, then `/model` with an exact ID from the list. The list comes from the installed Codex app-server's [`model/list` endpoint](https://learn.chatgpt.com/docs/app-server#list-models-modellist), follows pagination, and excludes hidden picker entries. Catalog availability is subject to the account/provider's runtime restrictions. Listing starts a short-lived Codex process without creating a conversation or submitting a model turn. It can run while coding work is active; only one catalog lookup runs at a time.
+
+Selections belong to the current saved session, survive restart, and remain attached when you switch away and back. Other sessions/channels keep their own choices. New sessions use Codex defaults. Until you explicitly choose a model, Codex uses its configured or saved-thread model; the catalog's default marker is a recommendation, not proof of that session's effective model. `/model` and `!status` show the saved choice.
+
+Changing the selection requires all coding work to be idle and maintenance to release its lock. The change keeps the thread and history, applies to the next task, and is checked against Codex's effective thread response before submitting the prompt. Unknown IDs and failed lookups leave the previous choice intact. Existing follow-ups keep the active task's model.
+
+Slash commands respond privately to the owner inside Discord; the `!` aliases reply in the channel. All responses stay inline and long lists are paged. Use a bound normal text channel in the configured server; bind additional channels with `!repo PATH`. In connection-only mode you can inspect a saved selection, but listing and changing models require a normal restart. See [Discord command registration](discord.md#model-slash-commands) if slash commands are missing.
 
 ## Local CLI — on the Pi
 

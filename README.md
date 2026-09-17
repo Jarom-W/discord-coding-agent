@@ -45,6 +45,8 @@ All replies appear inline in chat, including long results and code, split into r
 
 See [chat controls and live follow-ups](docs/chat.md) for examples, receipts and mobile presentation.
 
+Use `/models` to list the models available through Codex, then `/model MODEL` to choose one for this session. `/model` shows the saved selection; `!models` and `!model` work too. Changes require idle work, keep conversation history, and persist across restarts. See [model commands](docs/reference.md#model-selection) and [slash-command setup](docs/discord.md#model-slash-commands).
+
 Tasks have **no bridge time limit by default**. Use `!run 30m Fix the failing tests` for an enforced cap, or `!run unlimited …` to remove the deadline for one task. Follow-ups keep the original deadline. Codex still stops when it finishes or fails; approval, connection and usage limits still apply. See the [command and timeout reference](docs/reference.md).
 
 Manual mode shows green **Approve** and red **Deny** buttons when your decision is needed. `!new auto` selects Codex's automatic approval reviewer while retaining the workspace sandbox; eligible requests can be approved or rejected. Settings are verified before work. Use `!new manual` for manual review.

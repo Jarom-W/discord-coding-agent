@@ -97,6 +97,19 @@ async def test_realistic_server_rejects_wrong_enums(tmp_path):
         await rpc.close()
 
 
+def test_wrong_effective_model_rejected_before_turn(tmp_path):
+    response = {
+        "thread": {"id": "same-thread"},
+        "cwd": str(tmp_path),
+        "approvalPolicy": "on-request",
+        "approvalsReviewer": "user",
+        "sandbox": {"type": "workspaceWrite"},
+        "model": "unexpected-model",
+    }
+    with pytest.raises(BridgeError, match="requested model"):
+        protocol.verify_thread(response, tmp_path, "manual", "chosen-model")
+
+
 def test_schema_evidence_checksums_and_enum_distinction(tmp_path):
     manifest = json.loads((FIX / "manifest.json").read_text())
     for name, digest in manifest["sha256"].items():

@@ -55,6 +55,7 @@ class State:
     mode: str = "manual"
     schema: int = 1
     thread_id: str | None = None
+    model: str | None = None
     interrupted: bool = False
     active: dict[str, Any] | None = None
     last_interruption: dict[str, Any] | None = None
@@ -114,6 +115,13 @@ class StateStore:
                 raise ValueError()
             if state.thread_id is not None and (
                 not isinstance(state.thread_id, str) or not state.thread_id
+            ):
+                raise ValueError()
+            if state.model is not None and (
+                not isinstance(state.model, str)
+                or not 1 <= len(state.model) <= 200
+                or not state.model.isprintable()
+                or any(char.isspace() or char == "`" for char in state.model)
             ):
                 raise ValueError()
             for record in [state.active, state.last_interruption]:

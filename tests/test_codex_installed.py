@@ -8,6 +8,7 @@ import pytest
 from discord_coding_agent import protocol
 from discord_coding_agent.config import Timeouts, discover_codex
 from discord_coding_agent.errors import RpcRejected
+from discord_coding_agent.models import list_models
 from discord_coding_agent.rpc import Rpc
 
 
@@ -40,11 +41,14 @@ async def test_installed_initialize_create_and_resume(tmp_path, mode):
             await rpc.start(protocol.argv(executable, mode), repo, env)
             await protocol.initialize(rpc)
             await protocol.verify_process(rpc, repo, mode)
+            catalog = await list_models(rpc)
+            assert catalog
+            selected_model = catalog[-1 if restart else 0].model
             response = await rpc.call(
                 "thread/resume" if restart else "thread/start",
-                protocol.thread_params(repo, mode, saved),
+                protocol.thread_params(repo, mode, saved, selected_model),
             )
-            thread = protocol.verify_thread(response, repo, mode)
+            thread = protocol.verify_thread(response, repo, mode, selected_model)
             # A real idle thread must reject steering, never implicitly start model work.
             with pytest.raises(RpcRejected) as rejection:
                 await rpc.call(

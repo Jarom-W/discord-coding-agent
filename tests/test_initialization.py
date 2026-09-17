@@ -66,6 +66,7 @@ class GatedRpc(Rpc):
                         "approvalPolicy": "on-request",
                         "approvalsReviewer": "user",
                         "sandbox": {"type": "workspaceWrite"},
+                        "model": params.get("model", "codex-default"),
                     }
                 elif method == "turn/start":
                     result = {"turn": {"id": "turn-1", "status": "inProgress"}}
@@ -102,6 +103,26 @@ async def preparation(engine, monkeypatch):
     yield e, sink, rpc
     await e.close()
     await rpc.close()
+
+
+@pytest.mark.parametrize("resume", [False, True])
+async def test_selected_model_applies_before_turn_and_keeps_thread(preparation, owner, resume):
+    e, _, rpc = preparation
+    e.state.model = "chosen-model"
+    if not resume:
+        e.state.thread_id = None
+    await e.message(owner, "Inspect the repo")
+    await rpc.wait_for_call("turn/start")
+    params = next(
+        params
+        for method, params in rpc.calls
+        if method == ("thread/resume" if resume else "thread/start")
+    )
+    assert params["model"] == "chosen-model"
+    assert e.state.thread_id == "thread-1"
+    assert e.verified
+    complete(e)
+    await e.worker
 
 
 @pytest.fixture

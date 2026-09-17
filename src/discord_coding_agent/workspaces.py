@@ -17,6 +17,7 @@ from .config import Config, outside, private_file, repository_identity
 from .engine import HELP, Engine, Origin, Pending, Sink
 from .errors import BridgeError
 from .locks import Lease
+from .models import Model, discover_models, valid_model
 from .state import StateStore, atomic_write, backup
 
 MAX_CHANNELS = 8
@@ -88,6 +89,7 @@ class Workspaces:
         self.engines: dict[str, Engine] = {}
         self.seen: list[int] = []
         self.connected = False
+        self.model_lookup: asyncio.Task[list[Model]] | None = None
         self.load()
 
     def load(self) -> None:
@@ -411,6 +413,69 @@ class Workspaces:
         finally:
             lease.close()
 
+    async def model_command(self, origin: Origin, command: str, argument: str = "") -> str:
+        if not self.permitted(origin):
+            raise BridgeError("Only the configured owner can use model commands in this server.")
+        selected = self.selected(origin.channel)
+        if not selected:
+            raise BridgeError("Select a repository in this channel first with !repo PATH.")
+        engine = self.engine(selected)
+        heading = f"Session: {selected.name}\nSelected model: {engine.state.model or 'Codex default (configured or saved thread model)'}"
+        if command == "model" and not argument:
+            return (
+                heading + "\nUse /models to list models, then /model MODEL to change this session."
+            )
+        if command not in {"model", "models"} or (command == "models" and argument):
+            raise BridgeError("Use /models or /model MODEL (also !models and !model MODEL).")
+        if command == "model" and not valid_model(argument):
+            raise BridgeError(
+                "Use /model with an exact model ID from /models. Nothing was changed."
+            )
+        if self.connection_only:
+            raise BridgeError(
+                "Connection-only mode: no Codex process invoked. Restart without --connection-only to list or change models."
+            )
+        if self.model_lookup and not self.model_lookup.done():
+            raise BridgeError("A model lookup is already in progress. Wait and retry.")
+        lease = Lease(self.activity_path)
+        try:
+            if command == "model" and (self.active() or not lease.acquire()):
+                raise BridgeError(
+                    "Cannot change models during active work or maintenance. Wait or use !stop; nothing was changed."
+                )
+            self.model_lookup = asyncio.create_task(
+                discover_models(engine.config, engine.state.mode)
+            )
+            models = await self.model_lookup
+            if command == "models":
+                rows = [
+                    f"- `{model.model}` — {model.name}"
+                    + (" (catalog default)" if model.default else "")
+                    + (" (selected)" if model.model == engine.state.model else "")
+                    for model in models
+                ]
+                return (
+                    heading
+                    + "\n\nAvailable Codex models:\n"
+                    + ("\n".join(rows) or "No models returned by Codex.")
+                    + "\n\nUse /model MODEL to select an ID above. Changes apply to the next task."
+                )
+            if argument not in {model.model for model in models}:
+                raise BridgeError(
+                    "Unknown or unavailable model. Use /models and copy an exact model ID; nothing was changed."
+                )
+            previous = engine.state.model
+            engine.state.model = argument
+            try:
+                engine.save()
+            except BaseException:
+                engine.state.model = previous
+                raise
+            engine.verified = False
+            return f"Session: {selected.name}\nSelected model: {argument}. Saved for the next task; conversation history is preserved."
+        finally:
+            lease.close()
+
     async def message(self, origin: Origin, content: str, attachments: bool = False) -> None:
         if not self.permitted(origin) or origin.message in self.seen:
             return
@@ -450,6 +515,8 @@ class Workspaces:
                 )
             elif cmd in {"!repo", "!session", "!name", "!new"}:
                 sink.text(await self.switch(origin.channel, cmd, argument))
+            elif cmd in {"!models", "!model"}:
+                sink.text(await self.model_command(origin, cmd[1:], argument))
             elif cmd == "!sessions":
                 selected = self.selected(origin.channel)
                 rows = [
@@ -503,4 +570,7 @@ class Workspaces:
         return [e for e in self.engines.values() if e.config.channel_id == channel]
 
     async def close(self) -> None:
+        if self.model_lookup and not self.model_lookup.done():
+            self.model_lookup.cancel()
+            await asyncio.gather(self.model_lookup, return_exceptions=True)
         await asyncio.gather(*(engine.close() for engine in self.engines.values()))

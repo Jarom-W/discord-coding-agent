@@ -22,7 +22,7 @@ On **Bot → Privileged Gateway Intents**, enable **Message Content Intent**, th
 
 ## 4. Configure server installation and permissions — in the Developer Portal
 
-Under **Installation → Installation Contexts**, enable **Guild Install**. User Install is not needed. Under **Install Link**, select **Discord Provided Link**. In **Default Install Settings → Guild Install**, select the **bot** OAuth2 scope. This project uses prefix commands and component buttons; it does not register application/slash commands, so `applications.commands` is unnecessary (Discord may include it by default; it does not enable the Message Content Intent).
+Under **Installation → Installation Contexts**, enable **Guild Install**. User Install is not needed. Under **Install Link**, select **Discord Provided Link**. In **Default Install Settings → Guild Install**, select the **bot** and **applications.commands** OAuth2 scopes. The bridge registers `/models` and `/model` in the configured server and also supports prefix commands and component buttons. The command scope does not enable the Message Content Intent.
 
 Select only these permissions:
 
@@ -30,7 +30,7 @@ Select only these permissions:
 - **Send Messages** — replies and controls.
 - **Read Message History** — reconcile an HTTP timeout with a possibly already-sent result.
 
-Replies use native Markdown headings, small labels and inline text pages. Attach Files and Embed Links are unnecessary. Do not grant Administrator. If using **OAuth2 → URL Generator** instead of Installation, select `bot` and the same permissions. See [OAuth2 scopes](https://docs.discord.com/developers/topics/oauth2) and [Discord permissions](https://docs.discord.com/developers/topics/permissions).
+Replies use native Markdown headings, small labels and inline text pages. Attach Files and Embed Links are unnecessary. Do not grant Administrator. If using **OAuth2 → URL Generator** instead of Installation, select `bot`, `applications.commands` and the same permissions. See [OAuth2 scopes](https://docs.discord.com/developers/topics/oauth2) and [Discord permissions](https://docs.discord.com/developers/topics/permissions).
 
 ## 5. Install into your server — in a browser/Discord
 
@@ -74,6 +74,12 @@ Use Ctrl+C on the Pi to stop the foreground test. Then follow the normal startup
 ## Add another project channel
 
 Create another private normal text channel **in this same server** and repeat the channel/category permission grants in step 6 for the existing bot. As the configured owner, send `!ping`, `!dirs`, then `!repo ~/work/your-other-project`. No extra application, invite, token, channel-ID edit or process is needed. `!sessions`, `!new manual NAME` and `!session NAME` manage that channel's conversations. See [the full workspace guide](workspaces.md). One coding task runs at a time across all channels; `!status` identifies the active channel.
+
+## Model slash commands
+
+On startup, the bot registers `/models` and `/model` in the configured server. In a bound text channel, run `/models`, copy a model ID, and use `/model` with its `model` option to select it. Omit the option to inspect the selection. Replies are private to the owner; model changes require idle work and apply to the next task in that session.
+
+If the commands are missing, check the installation's `applications.commands` scope and your channel's **Use Application Commands** permission. Reauthorize the existing bot with the scopes in step 4 if needed, then restart the bridge while idle. A registration failure is reported in the journal and the configured channel; `!models` and `!model` remain available. No public Interactions Endpoint URL is needed. Only the configured owner can use these commands, even if other server members can see them in Discord's command picker.
 
 ## If ping does not work
 
