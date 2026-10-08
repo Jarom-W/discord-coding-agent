@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import subprocess
 from collections import defaultdict
 from dataclasses import replace
@@ -392,3 +393,159 @@ async def test_active_channel_followup_is_routed_without_cross_channel_steering(
     assert not other.busy and not other_rpc.calls
     assert "NOT submitted" in sinks[44].texts[-1][0]
     assert [m for m, _ in rpc.calls] == ["turn/start", "turn/steer"]
+
+
+async def test_delete_broken_selected_session_without_loading_it(spaces, owner):
+    w, sinks, _ = spaces
+    await w.switch(33, "!new", "broken session")
+    record = w.selected(33)
+    engine = w.engines.pop(record.id)
+    engine.store.save(engine.state)
+    engine.store.path.write_text("{broken")
+    await w.message(owner, "!sessions")
+    assert "state unavailable" in sinks[33].texts[-1][0]
+    await w.message(replace(owner, message=101), "!delete broken session")
+    assert record.id in w.sessions
+    await w.message(replace(owner, message=102), "!delete confirm broken session")
+    assert record.id not in w.sessions and w.selected(33) is None
+    assert not w.directory(record).exists()
+    assert w.config.repo.exists()
+    restored = Workspaces(w.config, w.legacy, lambda channel: sinks[channel])
+    assert record.id not in restored.sessions and restored.selected(33) is None
+    await restored.close()
+
+
+async def test_delete_default_and_all_sessions_restart_without_resurrection(spaces, owner):
+    w, sinks, _ = spaces
+    engine = w.engine(w.selected(33))
+    engine.state.thread_id = "old-thread"
+    engine.save()
+    await w.delete(33, "main")
+    await w.delete(33, "confirm main")
+    assert not w.sessions and not w.legacy.path.exists()
+    assert (w.legacy.directory / "process.lock").exists()
+    await w.close()
+    restored = Workspaces(w.config, w.legacy, lambda channel: sinks[channel])
+    assert not restored.sessions
+    await restored.message(owner, "!debug")
+    assert "No selected session" in sinks[33].texts[-1][0]
+    await restored.switch(33, "!repo", str(w.config.repo))
+    assert restored.selected(33).id != "default"
+    assert restored.engine(restored.selected(33)).state.thread_id is None
+    await restored.close()
+
+
+async def test_delete_confirmation_scope_expiry_busy_and_persistence_failure(
+    spaces, owner, monkeypatch
+):
+    w, _, second = spaces
+    await w.switch(44, "!repo", str(second))
+    with pytest.raises(BridgeError, match="preview"):
+        await w.delete(33, "confirm main")
+    await w.delete(33, "main")
+    with pytest.raises(BridgeError, match="Unknown session"):
+        await w.delete(44, "confirm main")
+    w.deletions[33] = ("default", 0)
+    with pytest.raises(BridgeError, match="expired"):
+        await w.delete(33, "confirm main")
+    await w.delete(33, "main")
+    lease = Lease(w.activity_path)
+    assert lease.acquire()
+    try:
+        with pytest.raises(BridgeError, match="maintenance"):
+            await w.delete(33, "confirm main")
+    finally:
+        lease.close()
+    engine, _ = stub(w, w.selected(44))
+    await begin(engine, replace(owner, channel=44))
+    with pytest.raises(BridgeError, match="active work"):
+        await w.delete(33, "confirm main")
+    complete(engine)
+    await engine.worker
+    original = w.engine(w.selected(33))
+    original.save()
+    monkeypatch.setattr(w, "save", lambda: (_ for _ in ()).throw(OSError("disk full")))
+    with pytest.raises(OSError):
+        await w.delete(33, "confirm main")
+    assert w.selected(33).id == "default" and original.store.path.exists()
+    assert lease.acquire()
+    lease.close()
+
+
+async def test_diagnostics_owner_only_no_model_bounded_feed(spaces, owner):
+    w, sinks, _ = spaces
+    engine, rpc = stub(w, w.selected(33))
+    for command in ["!logs", "!logs follow", "!debug", "!delete main"]:
+        await w.message(replace(owner, owner=99), command)
+    assert not sinks[33].texts and not w.watches and not w.deletions
+    await w.message(owner, "!logs follow")
+    for i in range(20):
+        logging.getLogger("discord_coding_agent.test").info("test=%s", i)
+    w.publish_logs()
+    assert "test=19" in sinks[33].texts[-1][0]
+    assert "test=0\n" not in sinks[33].texts[-1][0]
+    count = len(sinks[33].texts)
+    w.publish_logs()
+    assert len(sinks[33].texts) == count
+    await w.message(replace(owner, message=101), "!debug")
+    assert "RAM" in sinks[33].texts[-1][0] and not rpc.calls and not engine.busy
+    w.watches[33] = (w.diagnostics.sequence, 0)
+    w.publish_logs()
+    assert not w.watches and "expired" in sinks[33].texts[-1][0]
+    await w.message(replace(owner, message=102), "!logs 51")
+    assert "Use !logs" in sinks[33].texts[-1][0]
+
+
+async def test_deleted_session_frees_capacity_and_old_confirmation_cannot_delete_replacement(
+    spaces, monkeypatch
+):
+    w, _, _ = spaces
+    monkeypatch.setattr("discord_coding_agent.workspaces.MAX_SESSIONS", 2)
+    await w.switch(33, "!new", "old")
+    await w.delete(33, "old")
+    old_id = w.selected(33).id
+    await w.delete(33, "confirm old")
+    await w.switch(33, "!repo", str(w.config.repo))
+    await w.switch(33, "!new", "old")
+    w.deletions[33] = (old_id, float("inf"))
+    with pytest.raises(BridgeError, match="preview"):
+        await w.delete(33, "confirm old")
+    assert len(w.sessions) == 2
+
+
+async def test_delete_cleanup_failure_is_reported_after_catalog_commit(spaces, monkeypatch):
+    w, _, _ = spaces
+    await w.switch(33, "!new", "broken files")
+    record = w.selected(33)
+    w.engine(record).save()
+    await w.delete(33, record.name)
+    monkeypatch.setattr(
+        "discord_coding_agent.workspaces.shutil.rmtree",
+        lambda *_: (_ for _ in ()).throw(OSError("denied")),
+    )
+    message = await w.delete(33, "confirm " + record.name)
+    assert "unreferenced" in message and record.id not in w.sessions
+    assert record.id not in json.loads(w.path.read_text())["sessions"]
+    assert w.directory(record).exists()
+
+
+async def test_delete_name_with_reserved_prefix_and_logs_backpressure(spaces):
+    w, sinks, _ = spaces
+    await w.switch(33, "!new", "confirm something")
+    await w.delete(33, "preview confirm something")
+    await w.delete(33, "CONFIRM confirm something")
+    assert len(w.sessions) == 1
+    w.logs_command(33, "FOLLOW")
+    logging.getLogger("discord_coding_agent.test").info("feed event")
+    sinks[33].keys = {"one", "two", "three"}
+    w.publish_logs()
+    assert not sinks[33].texts
+    sinks[33].keys.clear()
+    w.connected = False
+    w.publish_logs()
+    assert not sinks[33].texts
+    w.connected = True
+    w.publish_logs()
+    assert "feed event" in sinks[33].texts[-1][0]
+    w.logs_command(33, "STOP")
+    assert not w.watches

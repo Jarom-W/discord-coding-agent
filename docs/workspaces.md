@@ -2,7 +2,7 @@
 
 One owner account controls the bot in one configured server. Up to eight text channels can hold selections, with 64 saved sessions across the bot. There is one coding task at a time, including initialization and approval/question waits. This protects shared checkouts even when two channels select the same repository.
 
-## One-time host setup — on the Pi
+## One-time host setup — on the host
 
 Follow the README quickstart, or [update the existing managed bridge](service.md#update-without-losing-credentials-or-conversation) while idle. `DISCORD_CHANNEL_ID` and `CODEX_REPO` are the initial channel/repository, retained for bootstrap and recovery; use Discord commands to switch projects and sessions. Keep the initial repository accessible. Keep the bridge installation, config and state outside coding repositories.
 
@@ -25,9 +25,9 @@ Roots govern bridge directory browsing/selection. They are **not a confidential-
 !status
 ```
 
-`!dirs` with no path lists roots. With a path it lists immediate subdirectories, including hidden directories, but never file contents. It scans at most 10,000 entries and returns at most 500 directories, with a notice when that bound is reached. Long listings appear as multiple inline chat messages. Absolute paths and `~` refer to the **Pi's service user**, not your laptop or Discord device; `$HOME` is not expanded in Discord. Relative `!dirs` paths start from the selected repository (or the first root in an unbound channel). Relative `!repo` paths start from the first root. Spaces need no quotes: `!repo ~/work/My Project` works.
+`!dirs` with no path lists roots. With a path it lists immediate subdirectories, including hidden directories, but never file contents. It scans at most 10,000 entries and returns at most 500 directories, with a notice when that bound is reached. Long listings appear as multiple inline chat messages. Absolute paths and `~` refer to the **host's service user**, not your laptop or Discord device; `$HOME` is not expanded in Discord. Relative `!dirs` paths start from the selected repository (or the first root in an unbound channel). Relative `!repo` paths start from the first root. Spaces need no quotes: `!repo ~/work/My Project` works.
 
-Selection requires an existing Git working-tree root. A subdirectory inside a repository or an ordinary non-Git folder is rejected clearly. To start a repository, create/clone it through your normal host tools first; for example **on the Pi**:
+Selection requires an existing Git working-tree root. A subdirectory inside a repository or an ordinary non-Git folder is rejected clearly. To start a repository, create/clone it through your normal host tools first; for example **on the host**:
 
 ```bash
 mkdir -p "$HOME/work/new-project"
@@ -58,10 +58,18 @@ Prose such as “open a new chat” is passed to Codex and does not change bridg
 
 1. In the same server, create a private **normal text channel** such as `#agent-project-b`.
 2. Grant your owner account access. Grant the existing bot **View Channels, Send Messages, Read Message History**. Check category overrides too; [the Discord guide](discord.md) shows these steps.
-3. Send `!ping`, then `!repo ~/work/project-b` as the configured owner. The channel acquires its own selected workspace and sessions. You do not copy a token, install a second application, or restart the Pi service.
+3. Send `!ping`, then `!repo ~/work/project-b` as the configured owner. The channel acquires its own selected workspace and sessions. You do not copy a token, install a second application, or restart the host service.
 4. Send a read-only repository question, wait for completion, then `!name project-b planning`.
 
 Other users, other servers, DMs, Discord threads, forum posts and announcement channels cannot start work. Ordinary text in a previously unbound channel is ignored; an explicit command begins setup. Limit bot access to the channels you intend to use. Anyone who can read a channel can read its answers, so channel privacy still matters even with owner-only controls.
+
+## Delete old or broken sessions
+
+In the session's channel, send `!sessions`, then `!delete NAME` to preview exactly which session will be removed. Send `!delete confirm NAME` within 60 seconds. Names can contain spaces and match without case sensitivity. For a name beginning with `confirm ` or `preview `, use `!delete preview NAME` to request the preview explicitly. Confirmations are tied to the session ID and channel; a newly created session with the same name cannot inherit an old confirmation.
+
+Deletion requires all coding work and maintenance to be idle. It removes the bridge catalog entry, saved result, model choice and per-session state files, freeing one of the 64 slots. It preserves your working tree, Git history, Codex rollouts and existing backups. There is no Discord undo; restore a matching private backup locally if necessary. The catalog commits before state cleanup; a crash or cleanup failure can leave unreferenced private files, but a deleted entry will not reappear after restart. A cleanup failure is reported explicitly.
+
+You can delete a broken session without successfully resuming or loading its state, including the original `main` session. If it is selected, the channel becomes unselected; use `!session NAME` or `!repo PATH` next. Other channels and their sessions are unchanged. Listing a corrupt session marks its state unavailable instead of preventing cleanup. A corrupt workspace catalog itself still needs local backup/recovery.
 
 ## Persistence and recovery
 
@@ -71,6 +79,6 @@ After restart, select a session with `!session NAME` to continue it. An interrup
 
 For damaged catalog/state, stop the service and privately back up the **whole** state directory. Corruption fails clearly; unknown catalog schemas receive a backup. Do not delete a live process/activity lock. Restore a known-good matching catalog and session files, or deliberately choose a new `STATE_DIR` to start clean. This does not undo edits or delete Codex history. See [general recovery](troubleshooting.md).
 
-Current bounds are eight channel entries (including channels in setup) and 64 sessions, with 32 queued outbound jobs per channel. No session/channel deletion or automatic history pruning is implemented. If you reach the limit, preserve the existing state and choose a new state directory deliberately; the old catalog remains recoverable. Config/state are private, and the product has no multi-owner/organization administration system.
+Current bounds are eight channel entries (including channels in setup) and 64 sessions, with 32 queued outbound jobs per channel. Use `!delete NAME` to free a session slot. Channel deletion and automatic Codex history pruning are not implemented. Config/state are private, and the product has no multi-owner/organization administration system.
 
 For rollback, preserve the full catalog and session directories and check the target release’s configuration/schema compatibility in the [release notes](../CHANGELOG.md). Follow the [rollback procedure](service.md#rollback); never use rollback to replay interrupted coding work.

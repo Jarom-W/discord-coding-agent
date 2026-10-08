@@ -1,6 +1,6 @@
 # Troubleshooting and safe recovery
 
-Start with `!ping`, `!status full`, and `!last` in the configured channel. On the Pi, run from the bridge directory:
+Start with `!ping`, `!debug`, `!logs 50`, `!status full`, and `!last` in the configured channel. On the host (M720q or Pi), run from the bridge directory:
 
 ```bash
 .venv/bin/discord-coding-agent doctor
@@ -11,10 +11,27 @@ journalctl --user -u discord-coding-agent.service -n 200 --no-pager -o short-iso
 
 `doctor` shows versions, platform, configured paths, timeout values and capability failures without tokens. `--probe` creates its own Codex child for non-model handshake/config/account-presence checks; it does not load or run the bridge's conversation. `--discord` tests REST token/channel access, not Gateway intents or send permissions. Connection-only `!ping` tests receive/send. No production credentials belong in CI.
 
+## Discord diagnostics and log retention
+
+`!debug` collects a read-only snapshot of OS/architecture, Python, CPU count, load averages, available/total RAM, free/total swap and state-disk space. It includes uptime, the running release, Gateway state, active coding channel, and the selected session's detailed status and saved failure. Missing `/proc` metrics appear as unavailable. It does not run a shell, invoke Codex, or alter work and is available during a task or in an unselected channel.
+
+`!logs` shows the latest 20 operational lines; `!logs 50` shows up to 50. Logs are bot-wide and carry UTC timestamps, task/RPC IDs, preparation stages/timings, phase changes, Gateway/delivery errors, process lifecycle and safe stderr hints. Owner/server authorization applies to all diagnostic commands; use private channels because everyone with channel access can read responses.
+
+`!logs follow` starts a feed in that channel: at most 12 recent lines every 15 seconds, only when new records exist. It expires after 10 minutes or restart, pauses while the Gateway is disconnected, and defers when delivery is backlogged. High-volume events may be skipped; it is a live tail, not guaranteed delivery of every record. `!logs stop` ends it. The memory buffer holds 500 lines. Logs are formatted as inline code pages with outgoing mentions disabled.
+
+Private disk logs are written in both foreground and service mode under `STATE_DIR/logs/bridge.log`. Each file is bounded to 256 KiB with three rotating backups (`bridge.log.1` through `.3`), about 1 MiB total. The latest file's bounded tail is restored on restart. A file-write failure leaves the memory tail available and is indicated by `!logs`; inspect disk space/permissions. The systemd journal is independent and follows the host's journal retention settings. No new config flags are required.
+
+Raw Codex/MCP stderr, prompts, RPC payloads, environment variables, tool output and exception messages are not added to these operational logs. Stderr is drained and counted; only recognized categories (memory allocation, authentication, rate limit, panic, disk full, connection) are retained. These categories are hints and may refer to a child tool rather than Codex itself. Additional token/key redaction is defense in depth, not a reason to share private logs without review.
+
+For `Codex stdout disconnected`, inspect the reported exit code or signal and PID. EOF is not evidence by itself that the Pi ran out of RAM. `SIGKILL` may be OOM or an external kill; correlate with `sudo journalctl -k --since '30 minutes ago' --no-pager` on the host. A code of 0 during an unfinished task still means the transport ended unexpectedly. If exit status is not observed within 250 ms, the report says so rather than hanging on a live child/inherited pipe. Normal owned shutdown is logged separately. A saved failure survives restart and remains in `!status full` even if Discord delivery failed.
+
+The bridge closes a failed task's child and accepts an explicit new task once idle. It never replays uncertain work. If the whole bot/host is down, Discord commands cannot respond; inspect the service and kernel journal through SSH. A larger host may help local resource pressure, but it does not fix authentication, protocol, network or upstream failures.
+
 ## Symptoms and next steps
 
 | Symptom | Check and recovery |
 | --- | --- |
+| Too many old/broken sessions | Use `!sessions`, `!delete NAME`, then `!delete confirm NAME` within 60 seconds. All work must be idle. Repository files and Codex history remain. If you delete the selected session, choose another with `!session NAME` or `!repo PATH`. |
 | Failed task, but Gateway connected | The bridge can be running while its Codex task failed. Read the saved error in `!status full`; `!last` is the previous completed result. With no active task, a fresh ordinary message can start work in the same session after the cause is addressed. See [failed-task diagnostics](#failed-task-diagnostics). |
 | RPC-reader error after a successful result | Closing the owned Codex child ends stdout normally. Current releases log that as `transport=closed reason=owned_shutdown`; an unexpected EOF during work still reports an error. Correlate the error with the task transition rather than treating every historical reader-error line as a failed task. |
 | No response to `!ping` | Follow the ordered [Discord guide](discord.md): token, same application, saved Message Content Intent, owner/guild/channel IDs, bot membership, text-channel and category overrides. |
@@ -36,13 +53,13 @@ journalctl --user -u discord-coding-agent.service -n 200 --no-pager -o short-iso
 | Auto reviewer unsupported, mismatched or unverified | `doctor --probe` checks process config only; thread verification happens before submission. Managed requirements or unsupported CLI may reject overrides. Do not bypass restrictions or replace strings globally. On the checked CLI, deliberately choose `!new manual` if allowed; no silent fallback occurs. |
 | Automatic-review rejection/timeout | Read the reported action/rationale and final Codex explanation. Choose a safer request or handle it locally; auto mode does not mean blanket acceptance. Some review failures may arrive only as a general turn error, not a structured rejection. |
 | Typing indicator disappears or fails | Cosmetic HTTP errors are isolated. Use last observed activity and task phase; typing is not proof of progress. |
-| Quiet logs | No idle-read timeout is imposed. A long tool/model call may be quiet. Inspect event age, Pi resources and explicit deadline; use `!stop` if you decide to interrupt. |
+| Quiet logs | No idle-read timeout is imposed. A long tool/model call may be quiet. Inspect event age, host resources and explicit deadline; use `!stop` if you decide to interrupt. |
 | Timeout | Read the named operation and actual seconds. Initialization, RPC, partial transport frame, whole task, human wait, delivery and shutdown are different limits. See [reference](reference.md). Adjust the right TOML field and restart while idle. A request timeout may follow completed edits: never blindly resend. |
 | Thread start/resume times out despite an unlimited task | `!run unlimited` does not disable startup checks. Inspect the preparation step and initialization budget in `!status full`; see [slow conversation startup](#slow-conversation-startup) below. |
 | Still stops after one hour | Check `!status` and the private `[timeouts]` table. Set an explicit `task = 3600` to `task = 0` and restart while idle. `!run unlimited task text` overrides the default for one new task. Codex can still complete/fail earlier; this does not override account limits. |
 | Authentication error | Run the same configured executable's `login status` as the service user. Complete headless login locally; confirm service HOME/Codex authentication location and managed account requirements. Do not copy caches into Discord. |
 | Rate/usage limit | Check your Codex/account usage and service status through official account tools. Wait or adjust workload/auth plan as appropriate. Subscription coverage and limits are not guaranteed. The bridge does not loop-replay a failed turn. |
-| Wi-Fi/internet interruption | Gateway may reconnect while the coding task continues. Any enabled task deadline still applies. Final output persists before delivery; reconnect or `!last` recovers it. Check Pi network, DNS and clock before blaming Codex. |
+| Wi-Fi/internet interruption | Gateway may reconnect while the coding task continues. Any enabled task deadline still applies. Final output persists before delivery; reconnect or `!last` recovers it. Check host network, DNS and clock before blaming Codex. |
 | Low memory/storage on Pi | Check `free -h`, `df -h` and `journalctl -k` for OOM/storage errors. Reduce build concurrency and task size. A Pi 4 is resource-constrained. Do not delete state/rollouts to fix space without preserving recovery information. |
 | systemd `bad-setting` | Reinstall this project's generated unit and run `service validate`. WorkingDirectory must not have shell-style surrounding quotes; ExecStart has different escaping. Inspect `systemctl --user cat …`. Do not overwrite an unrelated TARS unit. |
 | `Failed to connect to bus`, runtime/user-bus errors | Log in directly by SSH as the service user, not sudo/root; inspect `loginctl user-status "$USER"` and distro user-session setup. Offline unit syntax validation is possible in containers but does not prove service startup. |
@@ -58,7 +75,7 @@ journalctl --user -u discord-coding-agent.service -n 200 --no-pager -o short-iso
 
 Read the **Last task failure** in `!status full` before continuing. The error survives restart and failed notifications; it does not replace the last completed result. Preparation failures report that the new prompt was not submitted. If turn submission was attempted, acceptance or effects may be uncertain: inspect the repository and affected external systems before deciding what to request next. The elapsed task value includes preparation and cleanup; use the saved error's named operation and configured limit to diagnose a timeout. Old interruptions that lack a saved reason still require their original journal entries.
 
-If `journalctl --user` reports **No journal files were found**, confirm the host/account and query the system journal with the user-unit filter. **On the Pi, as the account running the bot** (replace the unit name for a custom instance):
+If `journalctl --user` reports **No journal files were found**, confirm the host/account and query the system journal with the user-unit filter. **On the host, as the account running the bot** (replace the unit name for a custom instance):
 
 ```bash
 hostname
@@ -78,7 +95,7 @@ Discord can recover a dropped connection by [resuming its existing Gateway sessi
 For an active process whose readiness remains false:
 
 1. **In Discord:** inspect `!status`. Wait for active coding work to finish, or deliberately use `!stop` and review its effects before restarting.
-2. **On the Pi:** collect the bot journal, then restart only your managed bridge:
+2. **On the host:** collect the bot journal, then restart only your managed bridge:
 
    ```bash
    journalctl --user -u discord-coding-agent.service -n 80 --no-pager -o short-iso
@@ -86,7 +103,7 @@ For an active process whose readiness remains false:
    ```
 
 3. **In Discord:** wait for the connection message and confirm `!ping` responds. A new connection rebuilds the readiness record; do not edit `ready.json` or remove a live lock to force a pass.
-4. **On the Pi:** attempt deployment and inspect the configured interpreter without a pager:
+4. **On the host:** attempt deployment and inspect the configured interpreter without a pager:
 
    ```bash
    "$HOME/services/discord-coding-agent/.venv/bin/discord-coding-agent" deploy check --retry
@@ -102,7 +119,7 @@ If readiness still fails, inspect `gateway=configuration_error` / `permissions_m
 Codex [resumes a stored thread before a later `turn/start` submits new input](https://developers.openai.com/codex/app-server). A simple question can therefore fail during conversation loading, before Codex sees it. The bridge’s initialization budget covers this loading alongside the other preparation steps. A timeout alone does not establish whether the delay came from history loading, host resources, network access or configured integrations.
 
 1. **In Discord:** read `!status full` and record the session/thread, preparation step, timeout type/limit and task ID. Keep that session selected; a new conversation is not required merely to increase its startup budget.
-2. **On the Pi:** collect the journal and `doctor --probe` output using the commands at the top of this guide. A successful probe checks handshake/config/account access; it does **not** resume the selected conversation or prove that its tools can start.
+2. **On the host:** collect the journal and `doctor --probe` output using the commands at the top of this guide. A successful probe checks handshake/config/account access; it does **not** resume the selected conversation or prove that its tools can start.
 3. If startup is progressing but needs more time, edit **the existing `[timeouts]` table** in private config, for example `initialization = 180`, then restart while idle. The full-task setting can stay `task = 0`; ordinary request timeouts remain separate. A larger budget will not repair a permanently stalled process or unavailable dependency.
 4. After resolving the cause, send an explicit continuation. No failed prompt is automatically replayed. If the failed operation was `turn/start`, the prompt may already have been accepted: inspect repository status/diffs and any external effects first.
 
@@ -110,7 +127,7 @@ If a running bot still reports `RPC thread/resume ... configured limit 45s` rath
 
 ### Check host resource stalls
 
-If startup repeatedly fails, collect host evidence **on the Pi** before changing timeout defaults:
+If startup repeatedly fails, collect host evidence **on the host** before changing timeout defaults:
 
 ```bash
 uptime
@@ -128,7 +145,7 @@ A `D` process state is an uninterruptible wait; it can indicate I/O blocking and
 ## Interrupted-task recovery
 
 1. Let `!stop` finish or stop the managed bridge service. Read `!status` and `!last`; the latter is the last **completed** result, which may precede the interrupted task.
-2. On the Pi, inspect `git -C /your/target status` and `git -C /your/target diff`, plus any tools or external systems affected by the task. Cancellation does not undo effects. Do not use a destructive reset as a default recovery step.
+2. On the host, inspect `git -C /your/target status` and `git -C /your/target diff`, plus any tools or external systems affected by the task. Cancellation does not undo effects. Do not use a destructive reset as a default recovery step.
 3. Restart the bridge if needed. It reports interruption and resumes no coding work automatically.
 4. Send an explicit continuation describing what already happened and what you want next, or `!new` for a different conversation. The next message can reuse the existing Codex thread, but should not ask it to blindly repeat the uncertain action.
 

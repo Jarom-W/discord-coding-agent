@@ -254,6 +254,26 @@ async def connected_client(config, monkeypatch):
     await client.close()
 
 
+async def test_gateway_recovers_corrupt_session_and_remains_ready_after_deleting_it(
+    connected_client,
+):
+    client, _, _ = connected_client
+    engine = client.engine
+    engine.save()
+    engine.store.path.write_text("{broken")
+    client.workspaces.engines.clear()
+    await client.on_disconnect()
+    await client.on_ready()
+    assert json.loads((client.config.state_dir / "ready.json").read_text())["ready"]
+    assert not client.workspaces.engines
+    await client.workspaces.delete(33, "main")
+    await client.workspaces.delete(33, "confirm main")
+    await client.on_disconnect()
+    await client.on_ready()
+    assert json.loads((client.config.state_dir / "ready.json").read_text())["ready"]
+    assert not client.workspaces.sessions
+
+
 async def test_real_resumed_dispatch_restores_deployment_readiness_without_replaying_work(
     connected_client, owner, monkeypatch, tmp_path
 ):

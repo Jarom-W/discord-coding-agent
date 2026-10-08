@@ -10,7 +10,7 @@ Open [Discord Developer Portal → Applications](https://discord.com/developers/
 
 ## 2. Obtain the bot token — in the Developer Portal
 
-On **Bot → Token**, use **Reset Token** and copy the resulting token to a password manager or directly to the hidden setup prompt on the Pi. It may only be shown once. This is **not** the Application ID, Public Key, OAuth Client Secret, user account token, or a webhook URL. Only the bot token goes in `DISCORD_TOKEN`.
+On **Bot → Token**, use **Reset Token** and copy the resulting token to a password manager or directly to the hidden setup prompt on the host. It may only be shown once. This is **not** the Application ID, Public Key, OAuth Client Secret, user account token, or a webhook URL. Only the bot token goes in `DISCORD_TOKEN`.
 
 Treat the token as a password. Do not paste it into a channel, issue, screenshot, shell command, Git file or this project's example configuration. If exposed, reset it immediately, replace the private config value locally and restart the bridge. The old token stops working.
 
@@ -48,7 +48,7 @@ Enable **User Settings → Advanced → Developer Mode**. Right-click (or long-p
 
 Use those decimal numbers for `DISCORD_OWNER_ID`, `DISCORD_GUILD_ID`, and the initial `DISCORD_CHANNEL_ID`. Usernames, role IDs, channel names, application IDs and invite links are different values. The owner ID is your account, not the bot's account. Additional channels can be bound from Discord after first setup.
 
-## 8. Enter configuration — on the Pi
+## 8. Enter configuration — on the host
 
 After [installing the bridge and preparing a separate target repository](pi-codex.md):
 
@@ -59,9 +59,9 @@ cd "$HOME/services/discord-coding-agent"
 
 Enter the values locally. The token input is hidden. Setup validates the repository and writes a mode-600 TOML file in the per-user config directory. Existing config is backed up first. The example file is documentation only. Do not publish the completed file. If using a custom location, put `--config /absolute/path/config.toml` **before** `setup`, `run` or `doctor`.
 
-## 9. Run the connection-only test — on the Pi, then in Discord
+## 9. Run the connection-only test — on the host, then in Discord
 
-**On the Pi:**
+**On the host:**
 
 ```bash
 .venv/bin/discord-coding-agent run --connection-only
@@ -69,7 +69,7 @@ Enter the values locally. The token input is hidden. Setup validates the reposit
 
 **In the selected Discord channel:** send `!ping`. Expected reply: `TARS: pong — Discord receive/send works; no model invoked` (your label may differ). Ordinary coding text in this mode explains that Codex was not invoked. No Codex executable or login is needed for this test; a valid separate Git repository is still required by configuration validation.
 
-Use Ctrl+C on the Pi to stop the foreground test. Then follow the normal startup in the README and the [walkthrough](walkthrough.md).
+Use Ctrl+C on the host to stop the foreground test. Then follow the normal startup in the README and the [walkthrough](walkthrough.md).
 
 ## Add another project channel
 
@@ -88,6 +88,6 @@ If the commands are missing, check the installation's `applications.commands` sc
 - **Incorrect IDs:** verify your user/server and initial text-channel IDs. Other users/servers are ignored. In an additional private channel, use an explicit command such as `!repo PATH` first; ordinary unbound-channel text is ignored.
 - **Invisible channel:** check bot membership and category/channel View Channel overrides.
 - **No send or no long reply:** check Send Messages and Read Message History. The journal reports missing permissions; `!last` recovers the saved result after they are fixed.
-- **Network:** the Pi needs outbound internet/WebSocket and HTTPS connectivity. No incoming ports, router forwarding or **Interactions Endpoint URL** is used; leave that endpoint blank for this app.
+- **Network:** the host needs outbound internet/WebSocket and HTTPS connectivity. No incoming ports, router forwarding or **Interactions Endpoint URL** is used; leave that endpoint blank for this app.
 
 For active-task follow-ups, the compact status view and mobile display expectations, see [chat controls](chat.md). No new bot installation, intent, OAuth scope or permission is required.

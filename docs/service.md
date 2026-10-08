@@ -1,6 +1,6 @@
 # systemd user service, updates and removal
 
-These commands run **on the Pi as the same regular user who installed/authenticated Codex**. Do not run the bridge with sudo. Complete foreground `!ping` and a Codex conversation first. The service installer only manages units bearing this project's marker and refuses unmanaged units, including an unrelated existing TARS service.
+These commands run **on the host as the same regular user who installed/authenticated Codex**. Do not run the bridge with sudo. Complete foreground `!ping` and a Codex conversation first. The service installer only manages units bearing this project's marker and refuses unmanaged units, including an unrelated existing TARS service.
 
 ## Install and start
 
@@ -30,14 +30,14 @@ That config must also set a distinct `STATE_DIR`; do not run two instances again
 
 ## Start at boot and after logout
 
-`enable` starts the unit with the user manager; **linger** starts/keeps the user manager without an interactive login. **On the Pi**, request this explicit administrator action if your machine's policy requires it:
+`enable` starts the unit with the user manager; **linger** starts/keeps the user manager without an interactive login. **On the host**, request this explicit administrator action if your machine's policy requires it:
 
 ```bash
 sudo loginctl enable-linger "$USER"
 loginctl show-user "$USER" -p Linger
 ```
 
-Expect `Linger=yes`. The installer does not invoke sudo or change linger for you. A user-bus failure often means you used `sudo`, `su`, cron, or an SSH environment without a user systemd session. Log in directly as the service user and check `loginctl user-status "$USER"`. On normal Debian/Pi OS the login should establish `/run/user/UID` and the user bus. Do not blindly hard-code someone else's UID or bus address.
+Expect `Linger=yes`. The installer does not invoke sudo or change linger for you. A user-bus failure often means you used `sudo`, `su`, cron, or an SSH environment without a user systemd session. Log in directly as the service user and check `loginctl user-status "$USER"`. On normal Ubuntu/Debian/Pi OS the login should establish `/run/user/UID` and the user bus. Do not blindly hard-code someone else's UID or bus address.
 
 ## Daily operations and full logs
 
@@ -53,6 +53,8 @@ journalctl --user -u discord-coding-agent.service -f -o short-iso
 systemctl --user cat discord-coding-agent.service
 ```
 
+`!logs`, `!logs follow`, and `!debug` also expose sanitized diagnostics in Discord. Private rotating logs live at `STATE_DIR/logs/bridge.log` (256 KiB plus three backups). Raw Codex stderr and protocol payloads are excluded.
+
 `status` is a summary; `journalctl` gives full bridge logs. Restart while idle whenever possible. During active work the service attempts interrupt, then terminates its own process group; cancellation cannot undo effects. After a crash/restart, previous uncertain work is marked interrupted and never automatically repeated. The last completed result is retained separately.
 
 The unit restarts on process failure with bounded systemd start bursts. Ordinary Codex task errors are visible through Discord and `!status`; they do not require cycling the Gateway process. Fix persistent auth/config errors, then `systemctl --user reset-failed discord-coding-agent.service` and start again.
@@ -61,7 +63,7 @@ The unit restarts on process failure with bounded systemd start bursts. Ordinary
 
 If the optional updater is enabled, run `deploy disable` from its bootstrap venv and wait for the updater service to become inactive before a manual update. The updater and manual `service install` both select a bot executable; follow [deployment maintenance](deployment.md) when managing versioned releases instead of inadvertently repointing the bot at the bootstrap checkout.
 
-Wait for idle (`!status`) or use `!stop` first. **On the Pi:**
+Wait for idle (`!status`) or use `!stop` first. **On the host:**
 
 ```bash
 cd "$HOME/services/discord-coding-agent"
@@ -111,13 +113,13 @@ git switch --detach "$(cat "$dca_backup/previous-commit.txt")"
 systemctl --user start discord-coding-agent.service
 ```
 
-If a newer release changed state schema, consult its migration notes before restoring the saved state directory. Keep the current state as a second private backup. Never restore state while a service owns its lock, and never assume restoring state reverts repository edits or remote actions. Session state and workspace catalogs use schema 1 and refuse unknown schemas, preserving a timestamped backup instead of guessing a migration. Check the target release’s configuration and schema requirements in the [release notes](../CHANGELOG.md) before downgrading.
+If a newer release changed state schema, consult its migration notes before restoring the saved state directory. Keep the current state as a second private backup. Never restore state while a service owns its lock, and never assume restoring state reverts repository edits or remote actions. Session state uses schema 1; workspace catalogs use schema 2 (schema 1 is read on upgrade) and refuse unknown schemas, preserving a timestamped backup instead of guessing a migration. Check the target release’s configuration and schema requirements in the [release notes](../CHANGELOG.md) before downgrading.
 
 ## Uninstall
 
 If automatic updating is installed, run `deploy uninstall` first and resolve any recorded interrupted deployment as described in [the deployment guide](deployment.md). This prevents a timer from restarting a bot you intend to remove.
 
-**On the Pi:**
+**On the host:**
 
 ```bash
 cd "$HOME/services/discord-coding-agent"

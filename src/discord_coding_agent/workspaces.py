@@ -2,9 +2,11 @@
 
 import asyncio
 import json
+import logging
 import math
 import os
 import re
+import shutil
 import sys
 import time
 import uuid
@@ -14,6 +16,7 @@ from pathlib import Path
 
 from . import runtime
 from .config import Config, outside, private_file, repository_identity
+from .diagnostics import Diagnostics, host_report
 from .engine import HELP, Engine, Origin, Pending, Sink
 from .errors import BridgeError
 from .locks import Lease
@@ -22,11 +25,13 @@ from .state import StateStore, atomic_write, backup
 
 MAX_CHANNELS = 8
 MAX_SESSIONS = 64
+log = logging.getLogger(__name__)
 WORKSPACE_HELP = """## Repositories and saved sessions
 `!dirs [PATH]` — list directories under WORKSPACE_ROOTS; omit PATH to list the roots
 `!repo PATH` — select an existing Git repository in this channel; spaces in paths are allowed
 `!sessions` — list this channel's saved sessions, repositories and modes
 `!session NAME` — return to a saved session and its repository
+`!delete NAME` — preview deletion; then !delete confirm NAME within 60 seconds
 `!name NAME` — rename the selected session (names can contain spaces)
 `!new [auto|manual] [NAME]` — create a saved session in the selected repository; old sessions remain available
 In another private text channel in the same server, grant this bot access and send !repo PATH. No new bot/token is needed.
@@ -90,7 +95,11 @@ class Workspaces:
         self.seen: list[int] = []
         self.connected = False
         self.model_lookup: asyncio.Task[list[Model]] | None = None
+        self.deletions: dict[int, tuple[str, float]] = {}
+        self.watches: dict[int, tuple[int, float]] = {}
+        self.log_worker: asyncio.Task[None] | None = None
         self.load()
+        self.diagnostics = Diagnostics(legacy.directory, config.token)
 
     def load(self) -> None:
         if not self.path.exists():
@@ -117,7 +126,7 @@ class Workspaces:
             raw = json.loads(self.path.read_text())
             if not isinstance(raw, dict):
                 raise ValueError()
-            if raw.get("schema") != 1:
+            if raw.get("schema") not in {1, 2}:
                 saved = backup(self.path)
                 raise BridgeError(
                     f"Unknown workspace catalog schema; preserved {saved}. Use the matching bridge release."
@@ -129,11 +138,11 @@ class Workspaces:
             self.sessions = {key: Session(**value) for key, value in raw["sessions"].items()}
             self.channels = {int(key): value for key, value in raw["channels"].items()}
             self.seen = raw["seen"]
-            if "default" not in self.sessions:
+            if raw["schema"] == 1 and "default" not in self.sessions:
                 raise ValueError()
             if (
                 not 1 <= len(self.channels) <= MAX_CHANNELS
-                or not 1 <= len(self.sessions) <= MAX_SESSIONS
+                or not 0 <= len(self.sessions) <= MAX_SESSIONS
             ):
                 raise ValueError()
             if any(
@@ -179,7 +188,7 @@ class Workspaces:
             self.path,
             json.dumps(
                 {
-                    "schema": 1,
+                    "schema": 2,
                     "guild": self.config.guild_id,
                     "channels": self.channels,
                     "sessions": {key: asdict(value) for key, value in self.sessions.items()},
@@ -310,7 +319,7 @@ class Workspaces:
     def add(self, channel: int, name: str, path: Path, identity: str, mode: str) -> Session:
         if len(self.sessions) >= MAX_SESSIONS:
             raise BridgeError(
-                f"Maximum {MAX_SESSIONS} saved sessions reached; see workspace limits/recovery documentation."
+                f"Maximum {MAX_SESSIONS} saved sessions reached; use !delete NAME to remove an old session."
             )
         name = session_name(name)
         if any(
@@ -476,6 +485,144 @@ class Workspaces:
         finally:
             lease.close()
 
+    async def delete(self, channel: int, argument: str) -> str:
+        preview = argument.lower().startswith("preview ")
+        confirm = not preview and argument.lower().startswith("confirm ")
+        name = argument.split(maxsplit=1)[1] if preview or confirm else argument
+        if not name:
+            raise BridgeError("Use !delete NAME, then !delete confirm NAME within 60 seconds.")
+        target = self.named(channel, name)
+        if not confirm:
+            self.deletions[channel] = (target.id, time.monotonic() + 60)
+            return (
+                f"Delete session **{target.name}** in this channel? This removes its bridge state, saved result and model selection. "
+                "Repository files and Codex history remain. If selected, this channel will need !session NAME or !repo PATH. "
+                f"Confirm within 60 seconds with `!delete confirm {target.name}`."
+            )
+        pending = self.deletions.get(channel)
+        if not pending or pending[0] != target.id or pending[1] < time.monotonic():
+            raise BridgeError("Deletion preview expired or changed. Use !delete NAME again.")
+        lease = Lease(self.activity_path)
+        if self.active() or not lease.acquire():
+            raise BridgeError(
+                "Cannot delete sessions during active work or maintenance. Wait or use !stop."
+            )
+        try:
+            previous = self.channels.get(channel)
+            del self.sessions[target.id]
+            if previous == target.id:
+                self.channels[channel] = None
+            try:
+                self.save()  # Commit the catalog before removing any state files.
+            except BaseException:
+                self.sessions[target.id] = target
+                self.channels[channel] = previous
+                raise
+            self.deletions.pop(channel, None)
+            engine = self.engines.pop(target.id, None)
+            if engine:
+                await engine.close()
+                engine.activity.close()
+            warning = ""
+            try:
+                if target.id == "default":
+                    # The legacy directory also owns live locks, logs and the catalog.
+                    self.legacy.path.unlink(missing_ok=True)
+                else:
+                    directory = self.directory(target)
+                    if directory.is_symlink() or directory.parent.is_symlink():
+                        raise OSError("Refusing symlink during session cleanup")
+                    if directory.exists():
+                        shutil.rmtree(directory)
+            except OSError:
+                warning = " Some unreferenced bridge files remain on disk; inspect the private state directory locally."
+                log.warning("session=deleted cleanup=incomplete id=%s", target.id)
+            log.info("session=deleted channel=%s id=%s", channel, target.id)
+            return f"Deleted session: {target.name}. Repository files and Codex history remain.{warning} Use !sessions or !repo PATH."
+        finally:
+            lease.close()
+
+    def session_row(self, record: Session, selected: Session | None) -> str:
+        # Listing/deletion must work even when the saved session cannot be loaded.
+        try:
+            engine = self.engines.get(record.id)
+            state = (
+                engine.state
+                if engine
+                else StateStore(self.directory(record), record.identity, record.mode).load(
+                    recover=False
+                )
+            )
+            detail = f"{state.mode} | thread {state.thread_id or 'not created'}"
+        except (BridgeError, OSError):
+            detail = "state unavailable; use !delete to remove this broken session"
+        return f"{'*' if selected and record.id == selected.id else '-'} {record.name} | {record.repo} | {detail}"
+
+    def logs_command(self, channel: int, argument: str) -> str:
+        argument = argument.lower()
+        if argument == "follow":
+            self.watches[channel] = (self.diagnostics.sequence, time.monotonic() + 600)
+            if self.log_worker is None or self.log_worker.done():
+                self.log_worker = asyncio.create_task(self.follow_logs())
+            return (
+                "Live bridge logs enabled here for 10 minutes, at most 12 recent lines every 15 seconds. Use !logs stop.\n"
+                + self.diagnostics.report(10)
+            )
+        if argument == "stop":
+            self.watches.pop(channel, None)
+            return "Live log feed stopped in this channel."
+        if argument and (
+            len(argument) > 2
+            or not argument.isascii()
+            or not argument.isdigit()
+            or not 1 <= int(argument) <= 50
+        ):
+            raise BridgeError("Use !logs [1–50], !logs follow or !logs stop.")
+        return self.diagnostics.report(int(argument) if argument else 20)
+
+    def publish_logs(self) -> None:
+        for channel, (sequence, expires) in list(self.watches.items()):
+            if time.monotonic() >= expires:
+                del self.watches[channel]
+                self.sink(channel).text(
+                    "Live log feed expired. Use !logs follow to start it again."
+                )
+            elif self.connected:
+                if len(getattr(self.sink(channel), "keys", ())) > 2:
+                    continue  # A diagnostic feed must not crowd out task results/controls.
+                text = self.diagnostics.tail(12, after=sequence)
+                self.watches[channel] = (self.diagnostics.sequence, expires)
+                if text:
+                    self.sink(channel).text(
+                        "**Live bridge logs** (latest events, UTC)\n```text\n" + text + "\n```"
+                    )
+
+    async def follow_logs(self) -> None:
+        while self.watches:
+            await asyncio.sleep(15)
+            self.publish_logs()
+
+    async def debug(self, channel: int) -> str:
+        active = self.active()
+        text = (
+            "**Debug report**\n"
+            + runtime.current().summary()
+            + f"\nBridge uptime: {time.monotonic() - self.diagnostics.started:.0f}s; Gateway: {'connected' if self.connected else 'disconnected'}"
+            + f"\nSessions: {len(self.sessions)}/{MAX_SESSIONS}; active coding channel: {active.config.channel_id if active else 'none'}"
+            + "\n"
+            + await asyncio.to_thread(host_report, self.legacy.directory)
+            + f"\nPrivate log: {self.diagnostics.path}\n"
+        )
+        selected = self.selected(channel)  # Selection may change during the host snapshot.
+        if selected:
+            try:
+                text += "\n" + self.engine(selected).status(detailed=True)
+            except (BridgeError, OSError):
+                text += "\nSelected session state cannot be loaded. Use !sessions and !delete NAME, or restore a private backup."
+        else:
+            text += "\nNo selected session. Use !sessions or !repo PATH."
+        return text + "\nUse !logs for recent events; no model or shell command was started."
+
     async def message(self, origin: Origin, content: str, attachments: bool = False) -> None:
         if not self.permitted(origin) or origin.message in self.seen:
             return
@@ -507,6 +654,14 @@ class Workspaces:
                 )
             if cmd == "!help":
                 sink.text(HELP + "\n\n" + WORKSPACE_HELP)
+            elif cmd == "!logs":
+                sink.text(self.logs_command(origin.channel, argument))
+            elif cmd == "!debug":
+                if argument:
+                    raise BridgeError("Use !debug without arguments.")
+                sink.text(await self.debug(origin.channel))
+            elif cmd == "!delete":
+                sink.text(await self.delete(origin.channel, argument))
             elif cmd == "!dirs":
                 sink.text(
                     await asyncio.wait_for(
@@ -520,7 +675,7 @@ class Workspaces:
             elif cmd == "!sessions":
                 selected = self.selected(origin.channel)
                 rows = [
-                    f"{'*' if selected and s.id == selected.id else '-'} {s.name} | {s.repo} | {self.engine(s).state.mode} | thread {self.engine(s).state.thread_id or 'not created'}"
+                    self.session_row(s, selected)
                     for s in self.sessions.values()
                     if s.channel == origin.channel
                 ]
@@ -570,7 +725,12 @@ class Workspaces:
         return [e for e in self.engines.values() if e.config.channel_id == channel]
 
     async def close(self) -> None:
+        self.watches.clear()
+        if self.log_worker:
+            self.log_worker.cancel()
+            await asyncio.gather(self.log_worker, return_exceptions=True)
         if self.model_lookup and not self.model_lookup.done():
             self.model_lookup.cancel()
             await asyncio.gather(self.model_lookup, return_exceptions=True)
         await asyncio.gather(*(engine.close() for engine in self.engines.values()))
+        self.diagnostics.close()

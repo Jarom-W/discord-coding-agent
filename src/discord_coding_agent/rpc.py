@@ -38,6 +38,7 @@ class Rpc:
         self.closing = False
         self.close_lock = asyncio.Lock()
         self.stderr_bytes = 0
+        self.stderr_hints: set[str] = set()
 
     async def start(self, argv: list[str], cwd: Path, env: dict[str, str] | None = None) -> None:
         self.process = await asyncio.create_subprocess_exec(
@@ -53,6 +54,36 @@ class Rpc:
         self.tasks = [
             asyncio.create_task(coro) for coro in [self._read(), self._write(), self._stderr()]
         ]
+        log.info("process=started pid=%s", self.process.pid)
+
+    def diagnostics(self) -> str:
+        process = self.process
+        code = process.returncode if process else None
+        status = "running or exit not yet observed" if code is None else f"exit code {code}"
+        if code is not None and code < 0:
+            try:
+                status = f"signal {signal.Signals(-code).name} ({code})"
+            except ValueError:
+                status = f"signal {-code}"
+        return (
+            f"Codex PID: {process.pid if process else 'not started'}; {status}; "
+            f"stderr bytes: {self.stderr_bytes}; stderr hints: {', '.join(sorted(self.stderr_hints)) or 'none'}. "
+            "Raw stderr is omitted."
+        )
+
+    async def eof_error(self) -> BridgeError:
+        assert self.process
+        # Give the child watcher a bounded chance to collect the actual exit code.
+        # EOF can also occur while the child (or an inherited pipe) stays alive.
+        try:
+            await asyncio.wait_for(self.process.wait(), 0.25)
+        except TimeoutError:
+            pass
+        return BridgeError(
+            "Codex stdout disconnected. "
+            + self.diagnostics()
+            + " Use !debug and !logs. SIGKILL can be OOM or an external kill; confirm in the host kernel journal. No task was replayed."
+        )
 
     def enqueue(self, message: Json) -> None:
         if self.failure or self.closing:
@@ -105,6 +136,7 @@ class Rpc:
         if self.failure or self.closing:
             return
         self.failure = error
+        log.warning("transport=failed %s", self.diagnostics())
         for future in self.pending.values():
             if not future.done():
                 future.set_exception(error)
@@ -121,9 +153,7 @@ class Rpc:
                     if self.closing:
                         log.info("transport=closed reason=owned_shutdown")
                         return
-                    raise BridgeError(
-                        "Codex stdout disconnected. Inspect authentication and process logs; no task was replayed."
-                    )
+                    raise await self.eof_error()
                 started = time.monotonic()
                 try:
                     tail = await asyncio.wait_for(reader.readline(), self.timeouts.transport)
@@ -211,9 +241,34 @@ class Rpc:
 
     async def _stderr(self) -> None:
         assert self.process and self.process.stderr
-        # Drain without retaining raw diagnostics: Codex/MCP stderr can contain secrets.
+        # Classify only known signatures; never persist or forward arbitrary stderr.
+        # The short overlap detects signatures split across pipe reads.
+        overlap = b""
+        signatures = {
+            "memory allocation": (
+                b"out of memory",
+                b"memory allocation",
+                b"cannot allocate memory",
+            ),
+            "authentication": (
+                b"unauthorized",
+                b"token expired",
+                b"authentication failed",
+                b"401 unauthorized",
+            ),
+            "rate limit": (b"rate limit", b"too many requests"),
+            "panic": (b"panicked at", b"stack backtrace"),
+            "disk full": (b"no space left on device",),
+            "connection": (b"connection reset", b"connection refused", b"dns error"),
+        }
         while data := await self.process.stderr.read(4096):
             self.stderr_bytes += len(data)
+            sample = overlap + data.lower()
+            for hint, patterns in signatures.items():
+                if hint not in self.stderr_hints and any(p in sample for p in patterns):
+                    self.stderr_hints.add(hint)
+                    log.warning("process=stderr_hint pid=%s category=%s", self.process.pid, hint)
+            overlap = sample[-64:]
 
     async def close(self) -> None:
         async with self.close_lock:
@@ -240,6 +295,7 @@ class Rpc:
                     with contextlib.suppress(ProcessLookupError):
                         os.killpg(process.pid, signal.SIGKILL)
                 await process.wait()
+                log.info("process=closed %s", self.diagnostics())
             for task in self.tasks:
                 task.cancel()
             await asyncio.gather(*self.tasks, return_exceptions=True)

@@ -5,6 +5,7 @@ import logging
 import sys
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from jsonschema import ValidationError, validate
@@ -61,7 +62,9 @@ async def test_eof_during_owned_shutdown_is_not_an_unexpected_disconnect(closing
     errors = []
     rpc = Rpc(Timeouts(), lambda *_: None, lambda *_: None, errors.append)
     reader = asyncio.StreamReader()
-    rpc.process = SimpleNamespace(stdout=reader)
+    rpc.process = SimpleNamespace(
+        stdout=reader, pid=123, returncode=0, wait=AsyncMock(return_value=0)
+    )
     rpc.closing = closing
     reader.feed_eof()
     with caplog.at_level(logging.INFO, logger="discord_coding_agent.rpc"):
