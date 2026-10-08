@@ -9,6 +9,11 @@ Only the configured owner in the configured server can invoke commands. The init
 | `!help` | Show commands and scope/limits in consecutive inline chat messages, readable on mobile without a download. |
 | `!ping` | Receive/send connectivity check with the running bridge version, managed release revision when available, and reply format; no Codex or model call. |
 | `!status` | Running bridge version/revision/reply format, task phase, Gateway state, thread, selected mode, last verification, elapsed time, last observed activity and age, pending IDs, follow-up counts, interruption and delivery status. Shows the preparation step while initializing. |
+| `!debug` | Read-only host CPU/load/RAM/swap/disk snapshot, bridge uptime, selected task/process and saved failure; no model or shell command. |
+| `!logs [N]` | Last N sanitized operational log lines, default 20, range 1–50, across the bot. |
+| `!logs follow` / `!logs stop` | Enable/stop a feed in this channel: up to 12 latest lines per 15 seconds, expires after 10 minutes or restart. |
+| `!delete NAME` | Preview deletion of a session in this channel, including broken/original sessions. |
+| `!delete confirm NAME` | Confirm the preview within 60 seconds while globally idle; remove bridge state, retain repository/Codex history. |
 | `!status full` | Add initialization/RPC budgets, task ID, last saved task failure and any interrupted follow-up metadata. |
 | `/models` or `!models` | List the current Codex model catalog, with exact selectable IDs and the saved selection. No model turn. |
 | `/model [MODEL]` or `!model [MODEL]` | Show the saved selection, or validate and save an exact model ID for this session's next task. Changes are idle-only. |
@@ -53,7 +58,7 @@ Changing the selection requires all coding work to be idle and maintenance to re
 
 Slash commands respond privately to the owner inside Discord; the `!` aliases reply in the channel. All responses stay inline and long lists are paged. Use a bound normal text channel in the configured server; bind additional channels with `!repo PATH`. In connection-only mode you can inspect a saved selection, but listing and changing models require a normal restart. See [Discord command registration](discord.md#model-slash-commands) if slash commands are missing.
 
-## Local CLI — on the Pi
+## Local CLI — on the host
 
 ```text
 discord-coding-agent [--config PATH] setup

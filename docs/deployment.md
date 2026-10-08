@@ -1,12 +1,12 @@
 # Automatic deployment after merges to main
 
-The bridge has GitHub Actions CI and an opt-in **pull updater on the Pi**: it checks the public GitHub API for successful CI on `main`, prepares a release locally, waits until coding work is idle, and switches the managed service. GitHub never needs to connect into the Pi. Your laptop may be closed.
+The bridge has GitHub Actions CI and an opt-in **pull updater on the host**: it checks the public GitHub API for successful CI on `main`, prepares a release locally, waits until coding work is idle, and switches the managed service. GitHub never needs to connect into the host. Your laptop may be closed.
 
 ```mermaid
 flowchart TD
     M[Merge into main] --> CI[GitHub Actions: test and package]
     CI --> G[Public API: exact main commit passed CI]
-    P[Pi systemd timer: outbound HTTPS] --> G
+    P[Host systemd timer: outbound HTTPS] --> G
     G --> B[Prepare commit in separate source directory and venv]
     B --> I{All channels idle?}
     I -- No --> W[Keep current bot; retry later]
@@ -20,7 +20,7 @@ GitHub's [workflow-run API](https://docs.github.com/en/rest/actions/workflow-run
 
 A local timer avoids placing a general Actions runner on the Codex host. GitHub [warns against self-hosted runners for public repositories](https://docs.github.com/en/actions/reference/security/secure-use) because untrusted workflow code can compromise their persistent environment. This design still has a clear trust boundary: **any code you merge into the selected main branch may execute as your Linux user**. Protect merge access and require CI/review as appropriate. The bot does not auto-merge code as part of deployment.
 
-## One-time activation — on the Pi
+## One-time activation — on the host
 
 Do this only for the bridge instance you intend to manage. It never adopts an unmanaged personal TARS unit. Automatic updates begin only after you install and enable the timer.
 
@@ -48,13 +48,13 @@ The default generated units are `discord-coding-agent-update.service` and `disco
 
 All later `deploy` commands read the unit name from that config directory's `deployment.toml`. Use a separate config directory for every managed instance. Installation is idempotent, validates both units with `systemd-analyze`, and backs up changed settings/units before replacement. It captures the installing shell's PATH for Git, Python, Codex and npm/nvm prerequisites.
 
-No token is required for this public-repository updater. No Pi SSH key, Discord token or Codex authentication is added to GitHub Actions. Private GitHub sources and GitHub Enterprise hosts are not supported by this updater version. Your **coding** repositories may still be private and use local Git authentication independently.
+No token is required for this public-repository updater. No host SSH key, Discord token or Codex authentication is added to GitHub Actions. Private GitHub sources and GitHub Enterprise hosts are not supported by this updater version. Your **coding** repositories may still be private and use local Git authentication independently.
 
 ## What happens on a merge
 
-The existing CI workflow runs on pushes and PRs. After a merge, the `push` run for that exact new main SHA must finish successfully. The Pi polls with a systemd timer: `OnUnitInactiveSec=300`, plus up to 30 seconds of jitter, with an initial check after two minutes. See the upstream [systemd timer specification](https://github.com/systemd/systemd/blob/main/man/systemd.timer.xml). There is no incoming webhook or open web port. Normal polls use one or two API requests; GitHub's [unauthenticated rate limit](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api) is shared by the host's public IP. A rate-limit/network error leaves the running bot alone and a later timer tick can retry.
+The existing CI workflow runs on pushes and PRs. After a merge, the `push` run for that exact new main SHA must finish successfully. The host polls with a systemd timer: `OnUnitInactiveSec=300`, plus up to 30 seconds of jitter, with an initial check after two minutes. See the upstream [systemd timer specification](https://github.com/systemd/systemd/blob/main/man/systemd.timer.xml). There is no incoming webhook or open web port. Normal polls use one or two API requests; GitHub's [unauthenticated rate limit](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api) is shared by the host's public IP. A rate-limit/network error leaves the running bot alone and a later timer tick can retry.
 
-The updater fetches the exact commit into its own release directory, checks `FETCH_HEAD`, creates a separate venv, installs hash-locked runtime wheels and the bridge package, runs `pip check` and local `doctor`, and validates the candidate unit. It clears inherited Git destination/config variables and disables global/system Git configuration for its own commands; public fetches need no credential helper. It never runs `git pull` in a coding repository or modifies a running venv. Dependency wheels must exist for the Pi's Python/ARM64 platform; otherwise preparation fails without replacing the bot. Preparing a release uses Pi CPU/storage but does not stop healthy coding work.
+The updater fetches the exact commit into its own release directory, checks `FETCH_HEAD`, creates a separate venv, installs hash-locked runtime wheels and the bridge package, runs `pip check` and local `doctor`, and validates the candidate unit. It clears inherited Git destination/config variables and disables global/system Git configuration for its own commands; public fetches need no credential helper. It never runs `git pull` in a coding repository or modifies a running venv. Dependency wheels must exist for the host's Python/architecture (x86-64 on the M720q; ARM64 on a Pi); otherwise preparation fails without replacing the bot. Preparing a release uses host CPU/storage but does not stop healthy coding work.
 
 All channels and the updater share `STATE_DIR/activity.lock`. Once idle, the updater acquires it, so a new message cannot slip between the idle check and restart. Messages during maintenance are explicitly rejected as not submitted. It backs up the managed unit, private config and JSON session/catalog state, then switches only the managed bot service. It retains each selected repository/session and never replays a coding task. A long-running task or pending approval can defer deployment indefinitely; use `!stop` yourself if you want it interrupted.
 
@@ -84,7 +84,7 @@ Release source/venvs live under `directory/releases/SHA`; private session backup
 
 Do not edit or work inside managed release directories. Never remove current/previous releases or the bootstrap updater venv. Before removing an incomplete candidate after a preparation failure, confirm its exact SHA/path, verify it is neither current nor previous in `deploy status`, and preserve anything you changed manually. Then move that incomplete directory outside `releases` and use `deploy check --retry`. Do not remove a coding repository to free deployment space.
 
-## Status, pause, rollback and removal — on the Pi
+## Status, pause, rollback and removal — on the host
 
 ```bash
 .venv/bin/discord-coding-agent deploy status
@@ -115,7 +115,7 @@ Auto-deployment updates the bot's versioned release, not the bootstrap updater i
 
 Every text page sent by the current bridge ends with `[dca:ID:inline:PAGE]`. A freshly posted attachment with a marker such as `[dca:ID:1/1]` came from an older delivery path. Check its timestamp and author: updating the bot does not convert existing attachments. A link written in the model's text is also different from a file uploaded by the bridge; include the short caption/marker in a bug report without sharing the file's private contents.
 
-**On the Pi:** these checks are read-only; use your configured unit name if different:
+**On the host:** these checks are read-only; use your configured unit name if different:
 
 ```bash
 cd "$HOME/services/discord-coding-agent"
@@ -137,7 +137,7 @@ After the inline release is running, use **`!last` in the affected channel** to 
 
 ### Other deployment failures
 
-In a disposable/test instance, merge a harmless change into your configured fork, wait for main CI, run `deploy check`, and compare `deploy status` with that main SHA. Confirm `!ping`, session continuity and a read-only task. Repeat with an active task: the updater should prepare/defer and leave the task running. Test failed readiness/rollback only in that disposable instance. The automated suite simulates these outcomes and validates units; it does not prove live Pi systemd/Gateway operation.
+In a disposable/test instance, merge a harmless change into your configured fork, wait for main CI, run `deploy check`, and compare `deploy status` with that main SHA. Confirm `!ping`, session continuity and a read-only task. Repeat with an active task: the updater should prepare/defer and leave the task running. Test failed readiness/rollback only in that disposable instance. The automated suite simulates these outcomes and validates units; it does not prove live Host systemd/Gateway operation.
 
 - **No update:** inspect main's `push` CI, the configured public repository, timer state, user bus/linger, and `deploy status`. Failed/skipped/pending CI or active coding work defers deployment.
 - **Legacy/not ready:** install/restart the current release manually and confirm the primary channel works. The updater will not stop an older, non-cooperating process.

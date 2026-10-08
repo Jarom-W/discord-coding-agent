@@ -137,7 +137,6 @@ class BridgeClient(discord.Client):
         self.workspaces = Workspaces(
             config, store, self.channel_delivery, connection_only=connection_only
         )
-        self.workspaces.engine(self.workspaces.sessions["default"])
         self.cosmetic_worker: asyncio.Task[None] | None = None
         self.ready_once = False
         self.shutting_down = False
@@ -147,7 +146,9 @@ class BridgeClient(discord.Client):
     def engine(self) -> Engine:
         """Configured channel's selection (legacy embedding API)."""
         selected = self.workspaces.selected(self.config.channel_id)
-        return self.workspaces.engine(selected or self.workspaces.sessions["default"])
+        if not selected:
+            raise BridgeError("No selected session in the initial channel. Use !repo PATH.")
+        return self.workspaces.engine(selected)
 
     @property
     def delivery(self) -> Delivery:
@@ -260,7 +261,14 @@ class BridgeClient(discord.Client):
             return
         for selected_id in self.workspaces.channels.values():
             if selected_id:
-                self.workspaces.engine(self.workspaces.sessions[selected_id])
+                try:
+                    self.workspaces.engine(self.workspaces.sessions[selected_id])
+                except (BridgeError, OSError) as exc:
+                    log_error(log, "session-restore", exc)
+                    record = self.workspaces.sessions[selected_id]
+                    self.channel_delivery(record.channel).text(
+                        f"Session {record.name} could not be loaded. Use !debug, !sessions or !delete NAME; restore a backup if needed."
+                    )
         for engine in self.workspaces.engines.values():
             delivery = self.channel_delivery(engine.config.channel_id)
             active_controls = {p.message_id for p in engine.pending.values()}
@@ -278,7 +286,7 @@ class BridgeClient(discord.Client):
                 f"{self.config.display_name} connected. {self.runtime.summary()} Use !ping, then !help. "
                 + (
                     "Previous work was interrupted; review git status/diff before sending a continuation. It was not replayed."
-                    if self.engine.state.interrupted
+                    if any(engine.state.interrupted for engine in self.workspaces.engines.values())
                     else ""
                 )
             )

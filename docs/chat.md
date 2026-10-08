@@ -59,3 +59,9 @@ The bridge never repeats an uncertain coding message just to recover a lost ackn
 If the original task completes, `!last` includes any follow-up delivery problems with the saved result, even if its Discord delivery failed. If the task itself was interrupted, `!last` is still the previous completed result; inspect `!status full` and repository changes before continuing. A quiet log or typing indicator alone does not establish a hang.
 
 For startup/protocol errors use the [troubleshooting guide](troubleshooting.md). Test the feature in a [disposable walkthrough session](walkthrough.md#add-instructions-while-a-task-is-active--in-discord) before relying on it for important work. Non-model protocol and simulated lifecycle tests do not establish live model responsiveness or mobile rendering.
+
+## Watch progress and remove broken conversations
+
+Send `!logs follow` to watch recent preparation, RPC timing, process and Gateway events in chat for up to ten minutes. Use `!logs stop` to stop the feed, `!logs 50` for a recent snapshot, and `!debug` for host resources and the selected task's detailed state. These controls do not invoke the model. See [diagnostic retention and privacy](troubleshooting.md#discord-diagnostics-and-log-retention).
+
+To remove an old session, use `!sessions`, `!delete NAME`, then `!delete confirm NAME` within 60 seconds. Work must be idle across all channels. Deleting the selected session leaves this channel unselected until `!session NAME` or `!repo PATH`. Repository files and Codex history remain; see [session cleanup](workspaces.md#delete-old-or-broken-sessions).

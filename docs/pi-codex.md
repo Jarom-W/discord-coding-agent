@@ -1,5 +1,7 @@
 # Prepare the Pi, Codex and repository
 
+For a Lenovo M720q running Ubuntu Server 24.04 LTS, use the dedicated [installation and Pi migration guide](m720q-ubuntu.md). This page retains the ARM64 Pi instructions.
+
 A Pi 4 with 4 GB RAM is the baseline target. Use **64-bit Raspberry Pi OS or Debian ARM64**; ordinary Linux x86-64 is also targeted. Large builds may exhaust Pi RAM/storage. Model inference happens remotely, while shell tools and builds run on the Pi as your regular Linux account.
 
 ## OS, SSH and Python

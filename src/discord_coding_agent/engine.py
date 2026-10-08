@@ -28,6 +28,9 @@ Send ordinary text to start or continue this channel's saved conversation. Send 
 `!ping` — connectivity and running version; no model
 `!status` — task, activity, approvals and delivery
 `!status full` — also show initialization/RPC diagnostics
+`!debug` — host RAM, disk, load, process and saved failure diagnostics
+`!logs [1–50]` — recent sanitized bridge logs (default 20)
+`!logs follow` / `!logs stop` — live log batches for up to 10 minutes
 `!stop` — interrupt work; does not undo completed edits or external effects
 `!last` — retrieve the last saved result, inline
 
@@ -358,6 +361,8 @@ class Engine:
                 f"Preparation step: {self.preparation_step}; initialization budget: {self.config.timeouts.initialization:g}s; ordinary RPC limit: {self.config.timeouts.request:g}s\n"
                 "Quiet logs/typing are not proof a task is stuck."
             )
+            if isinstance(self.rpc, Rpc):
+                text += "\n" + self.rpc.diagnostics()
             if self.state.last_interruption:
                 records = self.state.last_interruption.get("followups", [])
                 if records:
@@ -388,8 +393,10 @@ class Engine:
             else "This task's prompt was not submitted to Codex. After addressing startup, send a fresh message here; !new is not required."
         )
         message = (
-            f"{error}\nPreparation step: {self.preparation_step}. {submission} Nothing will be replayed automatically."
+            f"{error}\nPreparation step: {self.preparation_step}. {submission} Nothing will be replayed automatically. Use !debug and !logs for diagnostics."
         )[:4096]
+        if isinstance(self.rpc, Rpc) and "Codex PID:" not in message:
+            message = (message + "\n" + self.rpc.diagnostics())[:4096]
         if self.state.active:
             self.state.active["failure"] = message
             self.state.last_interruption = self.state.active.copy()

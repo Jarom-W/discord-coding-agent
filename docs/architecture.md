@@ -13,7 +13,7 @@ flowchart LR
     Delivery --> Discord
 ```
 
-The bridge has no inbound listener. Local execution runs on the Pi, while model inference uses Codex's remote service. The Python service is intentionally small: discord.py is the only direct runtime dependency. Configuration, CLI, process handling and persistence use the standard library. Schema validation is a development dependency, not a general runtime framework.
+The bridge has no inbound listener. Local execution runs on the host, while model inference uses Codex's remote service. The Python service is intentionally small: discord.py is the only direct runtime dependency. Configuration, CLI, process handling and persistence use the standard library. Schema validation is a development dependency, not a general runtime framework.
 
 ## Module boundaries
 
@@ -22,6 +22,7 @@ The bridge has no inbound listener. Local execution runs on the Pi, while model 
 - `workspaces.py`: owner/server routing, channel selections, directory roots and the named-session catalog.
 - `locks.py`: the task/workspace/maintenance lease shared by all channels and the updater.
 - `rpc.py`: owned subprocess group, bounded JSON frames/write queue, correlation futures, pipe failure handling.
+- `diagnostics.py`: bounded private operational logs, redaction/rotation and read-only host metrics.
 - `protocol.py`: exact 0.153.4 wire values and config/thread verification.
 - `followups.py`: bounded ordered input to the active turn, acknowledgement/uncertainty tracking and shutdown.
 - `engine.py`: authorization, message deduplication, task reservation, session selection, pending input and results.
@@ -69,7 +70,7 @@ Completion and `!stop` seal input immediately, cancel the input worker, mark any
 
 `state.json` stores schema, canonical repository/Git-directory identity, thread ID, mode, active-task correlation fields, last interrupted task/message/turn metadata, interruption flag, last result and delivery marker, recently handled message IDs, and control-message IDs to invalidate after restart. Writes use a mode-600 temporary file in the same directory, flush/fsync, atomic replacement, then directory fsync. The directory is 700. One `flock` is held for the process lifetime; a crash releases the kernel lock without deleting its inode.
 
-Session state schema remains 1. The workspace catalog is a separate schema-1 file; it indexes the original `state.json` as the initial `main` session without rewriting it. New sessions store state under opaque IDs in `sessions/`. Unknown schemas get a preserved backup and an explicit refusal; malformed state is left untouched. Repository identity is checked before reuse/work, and `!repo --fresh` deliberately creates independent history for a changed repository. State backups contain private result text; treat them as secrets. Codex stores its own rollout/history under its own configuration separately.
+Session state schema remains 1. The workspace catalog writes schema 2 and reads schemas 1–2; on first setup it indexes the original `state.json` as the initial `main` session without rewriting it. New sessions store state under opaque IDs in `sessions/`. Unknown schemas get a preserved backup and an explicit refusal; malformed state is left untouched. Repository identity is checked before reuse/work, and `!repo --fresh` deliberately creates independent history for a changed repository. State backups contain private result text; treat them as secrets. Codex stores its own rollout/history under its own configuration separately.
 
 An active reservation encountered after restart becomes interrupted. Neither it nor a lost `turn/start` acknowledgement is replayed. A new ordinary message is an explicit continuation: inspect the repository/effects first. The last completed result is saved before sending. It is independent of a later interrupted task.
 
@@ -86,3 +87,9 @@ Logs contain UTC timestamps, operation names, task/RPC/request correlation IDs, 
 The optional updater runs from a stable bootstrap venv under its own systemd timer. It prepares exact successful-main commits in separate venvs while the bot runs, then takes the activity lock for backup/switch/health checking. Readiness is tied to the service PID and systemd invocation, not a stale file or typing indicator. A durable transaction records the previous unit before mutation; failure restores code, never old coding requests. Retention preserves current/previous and registered repository paths. See [deployment design and limits](deployment.md).
 
 Page markers include a fingerprint of the full delivery text and pagination format. Partial output from a different label/layout cannot satisfy recovery for newly paginated text. Recovery can repeat earlier pages after such a change; it never skips new text based on incompatible old page boundaries. Unchanged content retains per-page reconciliation.
+
+## Diagnostics and session removal
+
+`diagnostics.py` owns a 500-line ring buffer and a private rotating log handler (256 KiB × four files). It accepts only bridge namespace operational records, drops exception payloads, and redacts configured/common credential forms. The Discord log tail and ten-minute bounded feed use the existing paginated delivery path, skip feed batches when delivery is backlogged, and never await HTTP from the RPC reader. Host metrics use read-only Python/procfs APIs, with explicit missing values. Raw stderr is drained in 4 KiB chunks; a 64-byte overlap recognizes split error signatures and only fixed categories are retained. EOF briefly awaits process status (250 ms maximum) and failure reports persist the observed code/signal before owned cleanup.
+
+`!delete` previews a channel-local session; confirmation is bound to its ID and expires in 60 seconds. A shared activity lease excludes coding work and maintenance. The catalog removal commits before any filesystem cleanup. Failed catalog writes restore the in-memory selection; failed cleanup leaves unreferenced files with an explicit warning. Schema 2 allows a missing legacy default and empty session catalog. Deleting the legacy session unlinks only its `state.json`, keeping live locks, catalog and logs. New session directories use validated opaque IDs. Listing/recovery does not instantiate corrupt inactive engines; a bad selected session is reported without preventing Gateway startup.

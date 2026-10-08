@@ -2,7 +2,7 @@
 
 This is a procedure for your own installation, not a claim that live Discord/model/Pi hardware tests have already passed. Use your configured owner account in the designated private channel. Wait for each result before sending the next ordinary message.
 
-## Prepare a disposable repository — on the Pi
+## Prepare a disposable repository — on the host
 
 Before bridge setup, make a separate demo repository:
 
@@ -22,7 +22,7 @@ Git requires your own configured author identity. Configure it yourself if Git p
 
 ## 1. Ping without a model
 
-**On the Pi:** run `discord-coding-agent run --connection-only` using your virtual environment. **In Discord:** send `!ping`, then `!help`. Expect pong and command help. Stop the foreground process on the Pi with Ctrl+C, run `doctor --probe`, then `run` without `--connection-only`.
+**On the host:** run `discord-coding-agent run --connection-only` using your virtual environment. **In Discord:** send `!ping`, then `!help`. Expect pong and command help. Stop the foreground process on the host with Ctrl+C, run `doctor --probe`, then `run` without `--connection-only`.
 
 ## 2. Read-only request and continuity — in Discord
 
@@ -40,7 +40,7 @@ What word did I ask you to remember, and which file did you inspect?
 
 Expect the earlier word and file. `!status` should show the same thread ID. “Read-only” here is an instruction for this particular prompt; the configured sandbox still permits workspace edits. Use a disposable repository when evaluating model behavior.
 
-## 3. Small edit — in Discord, then verify on the Pi
+## 3. Small edit — in Discord, then verify on the host
 
 Send:
 
@@ -48,7 +48,7 @@ Send:
 In this disposable repository, add a module docstring to greet.py. Preserve its behavior. Show the diff and run a small Python check of greet("Pi"). Do not commit or publish.
 ```
 
-**On the Pi:** inspect `git diff` and `git status` in the demo repository. Expect only the requested local edit and no automatic commit. Manual review mode does not require buttons for ordinary permitted edits inside the sandbox.
+**On the host:** inspect `git diff` and `git status` in the demo repository. Expect only the requested local edit and no automatic commit. Manual review mode does not require buttons for ordinary permitted edits inside the sandbox.
 
 ## 4. Manual approval buttons — in Discord
 
@@ -80,7 +80,7 @@ While idle, send `!run 10s In this disposable repository, run sleep 60 without e
 
 ## 7. Service restart and saved conversation
 
-Complete the [service setup](service.md). **In Discord:** start a new conversation and ask it to remember `lighthouse`. Wait for completion and note the thread ID. **On the Pi:**
+Complete the [service setup](service.md). **In Discord:** start a new conversation and ask it to remember `lighthouse`. Wait for completion and note the thread ID. **On the host:**
 
 ```bash
 systemctl --user restart discord-coding-agent.service
@@ -90,7 +90,7 @@ systemctl --user restart discord-coding-agent.service
 
 ## 8. Laptop-disconnect test
 
-With the service enabled, running and linger configured, close your SSH connection and close/disconnect the laptop. Leave the Pi powered and connected. **On your phone in Discord:** send `!ping`, then a short repository question. A reply demonstrates the Pi service does not depend on the laptop session. It does not demonstrate offline inference: the Pi still needs internet.
+With the service enabled, running and linger configured, close your SSH connection and close/disconnect the laptop. Leave the Pi powered and connected. **On your phone in Discord:** send `!ping`, then a short repository question. A reply demonstrates the host service does not depend on the laptop session. It does not demonstrate offline inference: the Pi still needs internet.
 
 ## 9. Separate deliberate reboot test
 

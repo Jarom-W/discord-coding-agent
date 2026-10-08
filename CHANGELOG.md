@@ -1,5 +1,14 @@
 # Release notes
 
+## 0.4.0 — M720q deployment, Discord diagnostics and session cleanup
+
+- Added a detailed Lenovo M720q / Ubuntu Server 24.04 LTS direct-install guide covering pinned x86-64 Codex, authentication, foreground checks, systemd/linger, Pi backups and cutover, repository transfer, rollback and resource diagnostics. Shared guides now apply to Linux hosts.
+- Added owner-only `!debug`, `!logs [1–50]`, `!logs follow` and `!logs stop`, with bounded UTC operational logs retained in memory and private rotating files. Raw stderr/prompt/tool payloads remain excluded.
+- Unexpected stdout EOF reports child PID, exit code/signal, stderr bytes and recognized failure hints. It does not assume an OOM kill or replay work. Saved errors retain process details.
+- Added confirmed, globally idle `!delete NAME` / `!delete confirm NAME`; broken and original sessions can be removed without loading them. Listing and Gateway recovery tolerate damaged individual session files. Repository files, Codex history and existing backups remain.
+
+**Upgrade/rollback:** back up the whole state directory before upgrading. Per-session state stays schema 1. The workspace catalog reads schema 1 but writes schema 2 to allow removal of the original session or every session. Older releases reject schema 2: rollback requires restoring the matching pre-upgrade catalog and session files while stopped. Never change the schema number by hand or restore only the catalog after deleting its session files. No Codex/dependency upgrade is included. Cross-host session identity migration is not supported; the M720q guide starts fresh sessions and preserves the Pi backup.
+
 ## Unreleased
 
 Added owner-only `/models` and `/model [MODEL]` slash commands, with `!models` and `!model` aliases. Available models come from Codex's paginated catalog. Each saved session retains its selected model across restarts; idle-only changes keep the conversation history and are verified before the next task. `/model` and `!status` show the selection. New sessions continue to use Codex defaults.

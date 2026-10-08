@@ -1,6 +1,6 @@
 # discord-coding-agent
 
-Converse with the **real Codex CLI on an always-on Raspberry Pi through Discord**. The Pi reads repositories, edits files and runs commands locally; model inference is remote. Close your laptop and continue from your phone.
+Converse with the **real Codex CLI on your Linux server through Discord**. The server reads repositories, edits files and runs commands locally; model inference is remote. Close your laptop and continue from your phone.
 
 The bridge supports one owner/server, channel-specific repositories and named sessions, with one active coding task across the bot. It uses discord.py's outbound Gateway and `codex app-server`; no public server, webhook, tunnel or port forwarding is needed.
 
@@ -10,9 +10,9 @@ This is an independent community project, **not an official OpenAI or Discord pr
 
 Use a regular Linux user and keep the bridge installation separate from the repositories Codex edits.
 
-1. **On the Pi:** follow [Pi, Python and Codex setup](docs/pi-codex.md). Use 64-bit Linux, Python **3.11–3.14** and **Codex CLI 0.153.4**, the checked compatibility baseline. See [tested platforms and limitations](docs/compatibility.md).
+1. **Choose your host:** follow the detailed [Lenovo M720q / Ubuntu Server 24.04 installation and Pi migration guide](docs/m720q-ubuntu.md), or [Raspberry Pi setup](docs/pi-codex.md). Use 64-bit Linux, Python **3.11–3.14** and **Codex CLI 0.153.4**, the checked compatibility baseline. See [tested platforms and limitations](docs/compatibility.md).
 2. **In the Developer Portal and Discord:** follow [bot setup](docs/discord.md) to create the bot, enable Message Content Intent, grant private-channel permissions and copy the numeric IDs.
-3. **On the Pi:** install and configure the bridge:
+3. **On the host:** install and configure the bridge:
 
    ```bash
    mkdir -p "$HOME/services"
@@ -26,8 +26,8 @@ Use a regular Linux user and keep the bridge installation separate from the repo
    ```
 
    Enter the token in the hidden local prompt and select an existing Git repository outside the bridge installation. Configuration is stored privately at `~/.config/discord-coding-agent/config.toml`; never commit it.
-4. **In Discord:** send `!ping`. Expect `pong` without a model call. Then press Ctrl+C in the Pi terminal to stop the connection test.
-5. **On the Pi:** check Codex and start normal operation:
+4. **In Discord:** send `!ping`. Expect `pong` without a model call. Then press Ctrl+C in the host terminal to stop the connection test.
+5. **On the host:** check Codex and start normal operation:
 
    ```bash
    codex login status
@@ -40,6 +40,8 @@ Use a regular Linux user and keep the bridge installation separate from the repo
 Follow [systemd installation](docs/service.md) to keep the bot running after logout and at boot. Stop the foreground bot before starting the service so it can acquire the state lock.
 
 ## Everyday use
+
+Use `!debug` for host RAM, disk, load and task/process diagnostics. `!logs` shows recent operational logs; `!logs follow` streams bounded batches for ten minutes and `!logs stop` ends the feed. Logs rotate privately on disk and survive restart. See [diagnostics](docs/troubleshooting.md#discord-diagnostics-and-log-retention).
 
 All replies appear inline in chat, including long results and code, split into readable pages without file downloads. `!help` groups the commands by purpose. `!ping` and `!status` identify the running bridge version and reply format; `!status` shows a compact task summary; `!status full` adds diagnostics and the last saved task error, even if its notification was lost. If new replies still arrive as files, [verify the running installation](docs/deployment.md#verify-the-running-bot). `!stop` interrupts work; it does not undo edits or external effects. `!last` retrieves the saved result. Send another ordinary message in the active channel to add instructions **while Codex is working**. The bot confirms when Codex accepts each follow-up; other channels remain busy.
 
@@ -62,17 +64,19 @@ Manual mode shows green **Approve** and red **Deny** buttons when your decision 
 !new auto release planning
 !sessions
 !session backend fixes
+!delete old broken session
+!delete confirm old broken session
 ```
 
-Replace the path with an existing Git working-tree root on the Pi. Allowed paths default to the initial repository's parent; configure `WORKSPACE_ROOTS` locally for additional locations. Names and paths can contain spaces.
+Replace the path with an existing Git working-tree root on the host. Allowed paths default to the initial repository's parent; configure `WORKSPACE_ROOTS` locally for additional locations. Names and paths can contain spaces. `!delete NAME` previews deletion; confirm within 60 seconds to remove its bridge state and free a session slot. Repository files and Codex history remain. Deleting the selected session leaves that channel unselected.
 
 For another project, grant the same bot access to another private text channel in the same server and send `!repo PATH` there. Each channel retains its selected repository and conversation. One task runs across all channels; session changes require idle work. Use bridge commands to switch sessions—asking Codex in prose to “open a new chat” does not change routing. See [workspace setup](docs/workspaces.md).
 
 ## Automatic updates
 
-The optional Pi updater deploys an exact `main` commit after its push CI passes, waits until coding work is idle, and restarts the bot. Startup failure triggers rollback. Merges can therefore restart TARS; merge when you are ready for deployment.
+The optional Linux updater deploys an exact `main` commit after its push CI passes, waits until coding work is idle, and restarts the bot. Startup failure triggers rollback. Merges can therefore restart TARS; merge when you are ready for deployment.
 
-**On the Pi**, with the managed bot service running and `!ping` working:
+**On the host**, with the managed bot service running and `!ping` working:
 
 ```bash
 cd "$HOME/services/discord-coding-agent"
@@ -86,7 +90,7 @@ cd "$HOME/services/discord-coding-agent"
 
 ## Guides
 
-- [Discord setup](docs/discord.md) · [Pi and Codex setup](docs/pi-codex.md) · [End-to-end walkthrough](docs/walkthrough.md)
+- [M720q / Ubuntu installation and migration](docs/m720q-ubuntu.md) · [Discord setup](docs/discord.md) · [Pi and Codex setup](docs/pi-codex.md) · [End-to-end walkthrough](docs/walkthrough.md)
 - [Chat controls and live follow-ups](docs/chat.md) · [Commands and configuration](docs/reference.md) · [Channel workspaces](docs/workspaces.md)
 - [systemd and manual updates](docs/service.md) · [Automatic deployment](docs/deployment.md) · [Troubleshooting](docs/troubleshooting.md)
 - [Architecture](docs/architecture.md) · [Compatibility and limitations](docs/compatibility.md) · [Security](SECURITY.md)
