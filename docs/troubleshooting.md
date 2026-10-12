@@ -31,6 +31,7 @@ The bridge closes a failed task's child and accepts an explicit new task once id
 
 | Symptom | Check and recovery |
 | --- | --- |
+| Cannot find `codex-code-mode-host` / incomplete Codex runtime | The CLI-only archive omits tool-runtime companions. Install the complete pinned package and retain its directory layout using the [repair instructions](m720q-ubuntu.md#repair-an-existing-cli-only-installation), then restart and run the explicit tool smoke test. Startup/conversation checks alone do not exercise tools. No new session or login is required. |
 | Too many old/broken sessions | Use `!sessions`, `!delete NAME`, then `!delete confirm NAME` within 60 seconds. All work must be idle. Repository files and Codex history remain. If you delete the selected session, choose another with `!session NAME` or `!repo PATH`. |
 | Failed task, but Gateway connected | The bridge can be running while its Codex task failed. Read the saved error in `!status full`; `!last` is the previous completed result. With no active task, a fresh ordinary message can start work in the same session after the cause is addressed. See [failed-task diagnostics](#failed-task-diagnostics). |
 | RPC-reader error after a successful result | Closing the owned Codex child ends stdout normally. Current releases log that as `transport=closed reason=owned_shutdown`; an unexpected EOF during work still reports an error. Correlate the error with the task transition rather than treating every historical reader-error line as a failed task. |

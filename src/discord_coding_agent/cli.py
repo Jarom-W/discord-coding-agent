@@ -81,6 +81,10 @@ async def doctor(config: Config, probe: bool, discord_check: bool) -> bool:
         f"Codex executable: {executable}; node on service PATH must be available for npm installations"
     )
     print(await protocol.version(executable, config.timeouts.initialization))
+    print(
+        "Native Linux runtime files: checked when CODEX_EXECUTABLE points to an ELF binary. "
+        "npm/shell launchers are not inspected; run the documented tool smoke test for those installations."
+    )
     # Atomic state replacement allows a read-only snapshot without taking the service lock.
     state = StateStore(config.state_dir, repository_identity(config.repo), config.mode).load(
         recover=False

@@ -1,5 +1,11 @@
 # Release notes
 
+## 0.4.1 — Repair incomplete standalone Codex installations
+
+The initial M720q guide downloaded the CLI-only asset, which omitted `codex-code-mode-host`. Startup and conversation probes could pass even though the first tool call failed. The guide now installs the checksum-verified complete 0.153.4 package, preserves its helper/search/sandbox/shell layout, and includes a repair that retains existing executable paths, credentials and sessions. The bridge now rejects missing/non-executable native helpers before submitting a task; arbitrary npm/shell wrapper targets are not guessed. An opt-in non-model regression executes JavaScript inside the actual code-mode host.
+
+**Existing installations:** upgrading the bridge does not install Codex companions. Follow the [M720q runtime repair](docs/m720q-ubuntu.md#repair-an-existing-cli-only-installation) on the server. Restarting alone will not repair the download. Codex remains pinned at 0.153.4; there are no dependency, state-schema, approval or sandbox changes.
+
 ## 0.4.0 — M720q deployment, Discord diagnostics and session cleanup
 
 - Added a detailed Lenovo M720q / Ubuntu Server 24.04 LTS direct-install guide covering pinned x86-64 Codex, authentication, foreground checks, systemd/linger, Pi backups and cutover, repository transfer, rollback and resource diagnostics. Shared guides now apply to Linux hosts.

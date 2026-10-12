@@ -43,7 +43,7 @@ command -v codex
 codex --version
 ```
 
-The checked baseline is **`codex-cli 0.153.4`**. No other CLI version is claimed compatible. This project does not upgrade the user's CLI. The current [Codex CLI installation documentation](https://developers.openai.com/codex/cli) and official [release assets](https://github.com/openai/codex/releases/tag/rust-v0.153.4) are the installation sources; match the Linux ARM64/x86-64 architecture and verify published release checksums where provided.
+The checked baseline is **`codex-cli 0.153.4`**. No other CLI version is claimed compatible. This project does not upgrade the user's CLI. The current [Codex CLI installation documentation](https://developers.openai.com/codex/cli) and official [release assets](https://github.com/openai/codex/releases/tag/rust-v0.153.4) are the installation sources; match the Linux ARM64/x86-64 architecture and verify published release checksums where provided. For a direct binary installation, choose the **complete `codex-package-ARCH-unknown-linux-musl.tar.gz` package**, preserving its `bin/`, `codex-path/` and `codex-resources/` directories; the CLI-only archive omits the code-mode tool host. Set `CODEX_EXECUTABLE` to the package's `bin/codex`. The [M720q instructions](m720q-ubuntu.md#2-install-the-pinned-x86-64-codex-executable) show the x86-64 layout; use the aarch64 asset on the Pi.
 
 If you already use npm with a **user-owned** prefix or nvm and `node`/`npm` are on PATH, install a separate pinned copy without replacing the existing executable:
 
