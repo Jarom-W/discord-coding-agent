@@ -8,6 +8,8 @@ This is an independent community project, **not an official OpenAI or Discord pr
 
 ## Quickstart
 
+If you installed the M720q using the earlier CLI-only download and see **cannot find `codex-code-mode-host`**, follow the [runtime repair instructions](docs/m720q-ubuntu.md#repair-an-existing-cli-only-installation). A bridge update alone does not install Codex's missing files.
+
 Use a regular Linux user and keep the bridge installation separate from the repositories Codex edits.
 
 1. **Choose your host:** follow the detailed [Lenovo M720q / Ubuntu Server 24.04 installation and Pi migration guide](docs/m720q-ubuntu.md), or [Raspberry Pi setup](docs/pi-codex.md). Use 64-bit Linux, Python **3.11–3.14** and **Codex CLI 0.153.4**, the checked compatibility baseline. See [tested platforms and limitations](docs/compatibility.md).

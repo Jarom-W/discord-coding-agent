@@ -31,6 +31,43 @@ OPT_OUT = [
 ]
 
 
+def check_runtime_files(executable: Path) -> Path | None:
+    """Check native Linux layouts without guessing how arbitrary launchers resolve binaries."""
+    try:
+        native = executable.resolve(strict=True)
+        with native.open("rb") as stream:
+            if stream.read(4) != b"\x7fELF":
+                return None  # npm/shell launchers are not the native executable.
+        helper = native.with_name("codex-code-mode-host")
+        required = [helper]
+        package = native.parent.parent
+        if (package / "codex-package.json").is_file():
+            required.extend(
+                package / path
+                for path in [
+                    "codex-path/rg",
+                    "codex-resources/bwrap",
+                    "codex-resources/zsh/bin/zsh",
+                ]
+            )
+        missing = [
+            str(path) for path in required if not path.is_file() or not os.access(path, os.X_OK)
+        ]
+    except OSError as exc:
+        raise BridgeError(
+            "Cannot inspect the Codex runtime installation. Check executable permissions and run doctor."
+        ) from exc
+    if missing:
+        raise BridgeError(
+            "Incomplete Codex runtime: missing or non-executable "
+            + ", ".join(missing)
+            + f". Install the complete codex-package archive for {BASELINE}, preserving bin/, codex-path/ and codex-resources/. "
+            "The CLI-only archive cannot provide the full tool runtime. See docs/m720q-ubuntu.md#repair-an-existing-cli-only-installation. "
+            "No task prompt was submitted."
+        )
+    return helper
+
+
 async def version(executable: Path, limit: float) -> str:
     started = time.monotonic()
     process = await asyncio.create_subprocess_exec(
@@ -52,6 +89,7 @@ async def version(executable: Path, limit: float) -> str:
         raise BridgeError(
             f"Unsupported Codex version; this release requires codex-cli {BASELINE}. Install it separately or contribute schema fixtures; no automatic upgrade or mode fallback."
         )
+    await asyncio.to_thread(check_runtime_files, executable)
     return found
 
 

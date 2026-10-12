@@ -31,7 +31,7 @@ When the exact installed CLI is available:
 DCA_TEST_CODEX=1 uv run --frozen pytest -q tests/test_codex_installed.py
 ```
 
-This runs non-model initialize/config/create/resume checks in a temporary unauthenticated Codex home. It appends a harmless history fixture with `thread/inject_items` to create a persisted rollout, then checks resume after child restart. It never sends `turn/start`. Codex may fetch service metadata, so network availability can affect it. Do not run these checks against production state.
+Put the complete native package's `bin/` on PATH for this check. In addition to non-model initialize/config/create/resume checks, the suite starts `codex-code-mode-host` directly and evaluates `text(1 + 1)` through its pinned V1 stdio protocol with no tools, credentials or model call. The protocol shapes follow upstream `codex-rs/code-mode-protocol/src/host/{codec,message,payload}.rs` at `rust-v0.153.4`. This helper test is skipped for npm/shell launchers whose native target is not directly inspected. The app-server checks run in a temporary unauthenticated Codex home. It appends a harmless history fixture with `thread/inject_items` to create a persisted rollout, then checks resume after child restart. It never sends `turn/start`. Codex may fetch service metadata, so network availability can affect it. Do not run these checks against production state.
 
 Protocol fixture provenance and hashes are checked in under `tests/fixtures/codex-0.153.4`. Generate candidate schemas with:
 

@@ -33,30 +33,79 @@ The bot needs outbound HTTPS/WebSocket access to Discord and Codex services. It 
 
 ## 2. Install the pinned x86-64 Codex executable
 
-The bridge checks **Codex CLI 0.153.4** exactly. Do not install an unpinned latest CLI or copy the Pi's ARM64 executable. The standalone Linux binary avoids a Node dependency. Download from the [official versioned release](https://github.com/openai/codex/releases/tag/rust-v0.153.4):
+The bridge checks **Codex CLI 0.153.4** exactly. Install the **complete package** for Linux x86-64 from the [official versioned release](https://github.com/openai/codex/releases/tag/rust-v0.153.4). The similarly named `codex-x86_64-unknown-linux-musl.tar.gz` contains only the CLI and is **insufficient**: a conversation can start while tool execution later fails because `codex-code-mode-host` is missing. The full package also provides search, sandbox and shell resources, without a Node dependency.
+
+On the M720q, as the bot's regular Linux user:
 
 ```bash
-mkdir -p "$HOME/tools/codex-0.153.4"
-cd "$HOME/tools/codex-0.153.4"
-curl --fail --location --proto '=https' --tlsv1.2 \
-  --output codex-x86_64-unknown-linux-musl.tar.gz \
-  https://github.com/openai/codex/releases/download/rust-v0.153.4/codex-x86_64-unknown-linux-musl.tar.gz
-tar -tzf codex-x86_64-unknown-linux-musl.tar.gz
-tar -xzf codex-x86_64-unknown-linux-musl.tar.gz
-chmod 755 codex-x86_64-unknown-linux-musl
-"$HOME/tools/codex-0.153.4/codex-x86_64-unknown-linux-musl" --version
+(
+  set -eu
+  mkdir -p "$HOME/tools/codex-0.153.4"
+  cd "$HOME/tools/codex-0.153.4"
+  curl --fail --location --proto '=https' --tlsv1.2 \
+    --output codex-package-x86_64-unknown-linux-musl.tar.gz \
+    https://github.com/openai/codex/releases/download/rust-v0.153.4/codex-package-x86_64-unknown-linux-musl.tar.gz
+  printf '%s  %s\n' \
+    a822187e1a2420c61c5926721bfbd878701ed95547c9bb0d4de4498a16ba1821 \
+    codex-package-x86_64-unknown-linux-musl.tar.gz | sha256sum --check -
+  tar -xzf codex-package-x86_64-unknown-linux-musl.tar.gz
+  ./bin/codex --version
+  ./bin/codex-code-mode-host --help
+  test -x codex-path/rg
+  test -x codex-resources/bwrap
+  test -x codex-resources/zsh/bin/zsh
+)
 ```
 
-Expected: `codex-cli 0.153.4`. Inspect the release's published verification material before extraction when available. If the download fails, inspect that release's asset names; do not substitute another version. The [Pi/Codex guide](pi-codex.md#install-the-checked-codex-version-separately) also documents a pinned npm installation if you already manage Node locally. Use the chosen executable's **absolute path** throughout setup.
+Expected: checksum `OK`, `codex-cli 0.153.4`, and the helper's usage text. The checksum above is the official release asset's SHA-256. The subshell stops on any failed step. Preserve the entire layout: `bin/codex`, `bin/codex-code-mode-host`, `codex-package.json`, `codex-path/` and `codex-resources/`. Do not move just the CLI out of `bin/`. Use `/home/YOUR-USER/tools/codex-0.153.4/bin/codex` as `CODEX_EXECUTABLE` for new installations. Do not copy ARM64 binaries from the Pi or substitute a newer CLI version.
+
+The [Pi/Codex guide](pi-codex.md#install-the-checked-codex-version-separately) also documents a pinned npm installation if you already manage Node locally. A successful `--version` or `doctor --probe` alone does not demonstrate actual tool execution. The native-file preflight checks for missing helpers/resources; arbitrary npm/shell launchers are not inspected. Run the tool smoke test in section 5 after every installation/repair.
+
+### Authenticate a new installation
 
 Authenticate as the service user:
 
 ```bash
-"$HOME/tools/codex-0.153.4/codex-x86_64-unknown-linux-musl" login --device-auth
-"$HOME/tools/codex-0.153.4/codex-x86_64-unknown-linux-musl" login status
+"$HOME/tools/codex-0.153.4/bin/codex" login --device-auth
+"$HOME/tools/codex-0.153.4/bin/codex" login status
 ```
 
 Open the URL shown by the CLI on your laptop/phone and complete sign-in. Device authentication may need enabling for your account/workspace; see [official headless authentication](https://developers.openai.com/codex/auth). Keep device codes and auth files out of Discord. This installs neither a local inference model nor a separate API billing requirement; use the authentication method supported by your account.
+
+### Repair an existing CLI-only installation
+
+If the bot reports it cannot find `/home/YOUR-USER/tools/codex-0.153.4/codex-code-mode-host`, the earlier guide installed an incomplete CLI-only archive. **Restarting alone does not install the missing file.** Wait for idle, then stop the bot before installing the complete package above:
+
+```bash
+systemctl --user stop discord-coding-agent.service
+```
+
+Stop a foreground instance with Ctrl+C instead. If the automatic updater is enabled, disable it first and wait for any in-progress update to finish using [deployment maintenance](deployment.md). It updates the bridge, not this separate Codex installation.
+
+After the complete package checks pass, preserve the original configured path with a symlink to the packaged CLI. This avoids editing credentials/configuration or reinstalling/repointing a managed release service:
+
+```bash
+(
+  set -eu
+  cd "$HOME/tools/codex-0.153.4"
+  test -x bin/codex
+  test -x bin/codex-code-mode-host
+  if [ -f codex-x86_64-unknown-linux-musl ] && [ ! -L codex-x86_64-unknown-linux-musl ]; then
+    mv codex-x86_64-unknown-linux-musl "codex-x86_64-unknown-linux-musl.cli-only-backup-$(date +%Y%m%d-%H%M%S)"
+  fi
+  ln -sfn bin/codex codex-x86_64-unknown-linux-musl
+  ./codex-x86_64-unknown-linux-musl --version
+)
+```
+
+This alias is for installations following the earlier guide; if you chose another executable path, update that path deliberately. Keep config/state and Codex authentication in place. Start the bot again:
+
+```bash
+systemctl --user start discord-coding-agent.service
+systemctl --user status discord-coding-agent.service --no-pager -l
+```
+
+Then send the tool smoke test below in your existing Discord session. No session deletion, token reset or new login is required for this repair. Re-enable an updater only if you disabled it. If another error appears, collect `!debug` and `!logs 50`; this fix addresses the missing runtime, not unrelated repository requirements or tool permissions.
 
 ## 3. Prepare the coding repositories
 
@@ -89,7 +138,7 @@ During setup, enter:
 | Bot token | Your existing bot token, entered at the hidden prompt; no new Discord bot is needed |
 | Owner/server/channel IDs | The same numeric IDs as the Pi installation |
 | Initial repository | `/home/YOUR-USER/work/my-project` (actual absolute working-tree root) |
-| Codex executable | `/home/YOUR-USER/tools/codex-0.153.4/codex-x86_64-unknown-linux-musl` |
+| Codex executable | `/home/YOUR-USER/tools/codex-0.153.4/bin/codex` |
 | Display label | Your preferred name, such as `TARS` |
 
 Setup stores private configuration in `~/.config/discord-coding-agent/config.toml`; state defaults to `~/.local/state/discord-coding-agent`. If you need additional repositories outside `~/work`, add `WORKSPACE_ROOTS` at the top level before `[timeouts]`, following [workspace setup](workspaces.md). Use fresh state on the M720q; section 7 explains why copied Pi session files cannot simply be resumed.
@@ -116,12 +165,12 @@ In Discord:
 
 ```text
 !logs follow
-Read-only: inspect git status and summarize this repository. Do not edit files.
+Read-only tool check: actually run `pwd` and `git status --short` using the command tool, and report their output. Do not edit files or access external services. If tools fail, report the error rather than infer a result.
 !status full
 !logs stop
 ```
 
-Complete any manual approval if appropriate. Check that the result arrives, then send a follow-up to verify the conversation continues. `!debug` shows resource snapshots; `!logs` shows preparation/RPC timing. Distinguish time spent preparing/resuming from time spent waiting on remote inference. Do not increase timeouts merely to hide unexplained failures.
+Complete any manual approval if appropriate. Check that actual command output arrives; a prose answer without a tool call is not a passing tool test. Then send a follow-up to verify the conversation continues. `!debug` shows resource snapshots; `!logs` shows preparation/RPC timing. Distinguish time spent preparing/resuming from time spent waiting on remote inference. Do not increase timeouts merely to hide unexplained failures.
 
 ## 6. Run at boot with systemd
 
