@@ -22,7 +22,7 @@ On **Bot → Privileged Gateway Intents**, enable **Message Content Intent**, th
 
 ## 4. Configure server installation and permissions — in the Developer Portal
 
-Under **Installation → Installation Contexts**, enable **Guild Install**. User Install is not needed. Under **Install Link**, select **Discord Provided Link**. In **Default Install Settings → Guild Install**, select the **bot** and **applications.commands** OAuth2 scopes. The bridge registers `/models` and `/model` in the configured server and also supports prefix commands and component buttons. The command scope does not enable the Message Content Intent.
+Under **Installation → Installation Contexts**, enable **Guild Install**. User Install is not needed. Under **Install Link**, select **Discord Provided Link**. In **Default Install Settings → Guild Install**, select the **bot** and **applications.commands** OAuth2 scopes. The bridge registers `/models`, `/model` and `/reasoning` in the configured server and also supports prefix commands and component buttons. The command scope does not enable the Message Content Intent.
 
 Select only these permissions:
 
@@ -77,9 +77,9 @@ Create another private normal text channel **in this same server** and repeat th
 
 ## Model slash commands
 
-On startup, the bot registers `/models` and `/model` in the configured server. In a bound text channel, run `/models`, copy a model ID, and use `/model` with its `model` option to select it. Omit the option to inspect the selection. Replies are private to the owner; model changes require idle work and apply to the next task in that session.
+On startup, the bot registers `/models`, `/model` and `/reasoning` in the configured server. In a bound text channel, run `/models`, copy a model ID, and use `/model` with its `model` option to select it. Omit the option to inspect the selection. After choosing a model, use `/reasoning` to list its levels and `/reasoning` with the `level` option to select one; `default` chooses its catalog default. Replies are private to the owner; model and reasoning changes require idle work and apply to the next task in that session.
 
-If the commands are missing, check the installation's `applications.commands` scope and your channel's **Use Application Commands** permission. Reauthorize the existing bot with the scopes in step 4 if needed, then restart the bridge while idle. A registration failure is reported in the journal and the configured channel; `!models` and `!model` remain available. No public Interactions Endpoint URL is needed. Only the configured owner can use these commands, even if other server members can see them in Discord's command picker.
+If the commands are missing, check the installation's `applications.commands` scope and your channel's **Use Application Commands** permission. Reauthorize the existing bot with the scopes in step 4 if needed, then restart the bridge while idle. A registration failure is reported in the journal and the configured channel; `!models`, `!model` and `!reasoning` remain available. No public Interactions Endpoint URL is needed. Only the configured owner can use these commands, even if other server members can see them in Discord's command picker.
 
 ## If ping does not work
 

@@ -37,8 +37,8 @@ async def test_catalog_uses_wire_model_ids_paginates_and_filters_hidden():
         validate(page, json.loads((FIXTURES / "ModelListResponse.json").read_text()))
     rpc = SimpleNamespace(call=AsyncMock(side_effect=pages))
     assert await models.list_models(rpc) == [
-        models.Model("model-a", "MODEL-A", True),
-        models.Model("model-b", "MODEL-B", False),
+        models.Model("model-a", "MODEL-A", True, ("medium",), "medium"),
+        models.Model("model-b", "MODEL-B", False, ("medium",), "medium"),
     ]
     for index, call in enumerate(rpc.call.await_args_list):
         assert call.args[0] == "model/list"
@@ -55,6 +55,11 @@ async def test_catalog_uses_wire_model_ids_paginates_and_filters_hidden():
         {"data": [{}]},
         {"data": [entry(model="bad model")]},
         {"data": [entry(hidden="false")]},
+        {"data": [entry(supportedReasoningEfforts=None)]},
+        {"data": [entry(supportedReasoningEfforts=[{}])]},
+        {"data": [entry(supportedReasoningEfforts=[{"reasoningEffort": "two words"}])]},
+        {"data": [entry(defaultReasoningEffort="unsupported")]},
+        {"data": [entry(defaultReasoningEffort=None)]},
         {"data": [], "nextCursor": 3},
         {"data": [], "nextCursor": "repeating"},
     ],
@@ -63,6 +68,26 @@ async def test_bad_catalog_fails_without_partial_results(response):
     rpc = SimpleNamespace(call=AsyncMock(return_value=response))
     with pytest.raises(BridgeError):
         await models.list_models(rpc)
+
+
+async def test_reasoning_levels_come_from_catalog_not_a_fixed_enum():
+    rpc = SimpleNamespace(
+        call=AsyncMock(
+            return_value={
+                "data": [
+                    entry(
+                        supportedReasoningEfforts=[
+                            {"reasoningEffort": "adaptive", "description": "Future level"}
+                        ],
+                        defaultReasoningEffort="adaptive",
+                    )
+                ]
+            }
+        )
+    )
+    model = (await models.list_models(rpc))[0]
+    assert model.reasoning_efforts == ("adaptive",)
+    assert model.default_reasoning_effort == "adaptive"
 
 
 @pytest.mark.parametrize(

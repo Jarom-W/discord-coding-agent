@@ -38,6 +38,8 @@ Send ordinary text to start or continue this channel's saved conversation. Send 
 `/models` — list available Codex models
 `/model [MODEL]` — show or change this session's model; changes require idle work
 `!models` / `!model [MODEL]` — equivalent text commands
+`/reasoning [LEVEL]` / `!reasoning [LEVEL]` — show supported levels or select one after /model; idle only for changes
+`/reasoning default` — select the model's catalog default reasoning level
 Selections survive restart and apply to the next task, keeping conversation history. New sessions use Codex defaults.
 
 ## Time limits
@@ -345,6 +347,7 @@ class Engine:
             f"**State: {self.phase}** · Gateway: {'connected' if self.connected else 'disconnected'}\n"
             f"**Mode:** {self.state.mode} · verified: {self.verified}\n"
             f"**Model:** {self.state.model or 'Codex default (configured or saved thread model)'}\n"
+            f"**Reasoning:** {self.state.reasoning_effort or 'Codex default (configured or saved thread effort)'}\n"
             f"**Elapsed:** {elapsed} · {'Active' if self.busy else 'Default'} task limit: "
             f"{describe_task_limit(self.task_limit if self.busy else self.config.timeouts.task)}\n"
             f"**Last observed activity:** {self.last_event} ({age})\n"
@@ -449,7 +452,11 @@ class Engine:
         response = await rpc.call(
             method,
             protocol.thread_params(
-                self.config.repo, self.state.mode, self.state.thread_id, self.state.model
+                self.config.repo,
+                self.state.mode,
+                self.state.thread_id,
+                self.state.model,
+                self.state.reasoning_effort,
             ),
             # Thread loading is preparation, not an ordinary 45-second RPC. The
             # outer initialization timer bounds ALL preparation stages together.
@@ -457,7 +464,11 @@ class Engine:
         )
         self.preparing("thread verification")
         thread_id = protocol.verify_thread(
-            response, self.config.repo, self.state.mode, self.state.model
+            response,
+            self.config.repo,
+            self.state.mode,
+            self.state.model,
+            self.state.reasoning_effort,
         )
         if self.state.thread_id and thread_id != self.state.thread_id:
             raise BridgeError(
@@ -509,6 +520,11 @@ class Engine:
                         {
                             "threadId": self.state.thread_id,
                             "input": [{"type": "text", "text": prompt, "text_elements": []}],
+                            **(
+                                {"effort": self.state.reasoning_effort}
+                                if self.state.reasoning_effort is not None
+                                else {}
+                            ),
                         },
                     )
                     turn = response.get("turn", {})

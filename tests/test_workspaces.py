@@ -21,7 +21,10 @@ from discord_coding_agent.workspaces import Workspaces
 @pytest.fixture
 def catalog(monkeypatch):
     lookup = AsyncMock(
-        return_value=[Model("model-a", "Model A", True), Model("model-b", "Model B", False)]
+        return_value=[
+            Model("model-a", "Model A", True, ("low", "medium", "high", "xhigh"), "medium"),
+            Model("model-b", "Model B", False, ("low", "high"), "low"),
+        ]
     )
     monkeypatch.setattr("discord_coding_agent.workspaces.discover_models", lookup)
     return lookup
@@ -88,7 +91,7 @@ async def test_model_change_reserves_workspace_during_lookup(spaces, owner, monk
     async def lookup(*_):
         arrived.set()
         await release.wait()
-        return [Model("model-a", "A", True)]
+        return [Model("model-a", "A", True, ("medium",), "medium")]
 
     monkeypatch.setattr("discord_coding_agent.workspaces.discover_models", lookup)
     task = asyncio.create_task(w.model_command(owner, "model", "model-a"))
@@ -140,6 +143,131 @@ async def test_model_connection_only_and_unbound_channel_no_lookup(spaces, owner
         await w.model_command(owner, "models")
     assert "Codex default" in await w.model_command(owner, "model")
     catalog.assert_not_awaited()
+
+
+async def test_reasoning_commands_persist_per_session_and_restart(spaces, owner, catalog):
+    w, sinks, second = spaces
+    original = w.selected(33)
+    engine = w.engine(original)
+    engine.state.thread_id = "original-thread"
+    engine.state.last_result = "saved result"
+    await w.model_command(owner, "model", "model-a")
+    await w.message(owner, "!reasoning")
+    assert "low, medium, high, xhigh" in sinks[33].texts[-1][0]
+    await w.message(replace(owner, message=101), "!reasoning HIGH")
+    assert engine.store.load().reasoning_effort == "high"
+    assert "**Reasoning:** high" in engine.status()
+    assert (
+        engine.state.thread_id == "original-thread" and engine.state.last_result == "saved result"
+    )
+    await w.switch(33, "!new", "other session")
+    assert w.engine(w.selected(33)).state.reasoning_effort is None
+    await w.switch(44, "!repo", str(second))
+    assert w.engine(w.selected(44)).state.reasoning_effort is None
+    await w.switch(33, "!session", original.name)
+    await w.close()
+    restored = Workspaces(w.config, w.legacy, lambda channel: sinks[channel])
+    try:
+        selected = restored.engine(restored.selected(33))
+        assert selected.state.reasoning_effort == "high"
+        await restored.model_command(owner, "reasoning", "default")
+        assert selected.store.load().reasoning_effort == "medium"
+    finally:
+        await restored.close()
+
+
+@pytest.mark.parametrize("effort", ["invalid", "medium high", "`high`", "x" * 65])
+async def test_unsupported_reasoning_keeps_selection(spaces, owner, catalog, effort):
+    w, _, _ = spaces
+    await w.model_command(owner, "model", "model-b")
+    engine = w.engine(w.selected(33))
+    await w.model_command(owner, "reasoning", "high")
+    with pytest.raises(BridgeError):
+        await w.model_command(owner, "reasoning", effort)
+    assert engine.state.reasoning_effort == engine.store.load().reasoning_effort == "high"
+
+
+async def test_reasoning_selection_requires_explicit_model(spaces, owner, catalog):
+    w, _, _ = spaces
+    assert "Select a model first" in await w.model_command(owner, "reasoning")
+    with pytest.raises(BridgeError, match="Select a model first"):
+        await w.model_command(owner, "reasoning", "high")
+    catalog.assert_not_awaited()
+
+
+async def test_model_without_reasoning_options_never_saves_an_unsupported_level(
+    spaces, owner, catalog
+):
+    w, _, _ = spaces
+    await w.model_command(owner, "model", "model-a")
+    await w.model_command(owner, "reasoning", "high")
+    catalog.return_value.append(Model("no-reasoning", "No reasoning", False, (), "none"))
+    with pytest.raises(BridgeError, match="no selectable reasoning"):
+        await w.model_command(owner, "model", "no-reasoning")
+    engine = w.engine(w.selected(33))
+    assert (engine.state.model, engine.state.reasoning_effort) == ("model-a", "high")
+
+
+@pytest.mark.parametrize(
+    "old_effort, new_effort, reset", [("high", "high", False), ("xhigh", "low", True)]
+)
+async def test_model_switch_preserves_compatible_reasoning_or_reports_reset(
+    spaces, owner, catalog, old_effort, new_effort, reset
+):
+    w, _, _ = spaces
+    await w.model_command(owner, "model", "model-a")
+    await w.model_command(owner, "reasoning", old_effort)
+    response = await w.model_command(owner, "model", "model-b")
+    state = w.engine(w.selected(33)).store.load()
+    assert (state.model, state.reasoning_effort) == ("model-b", new_effort)
+    assert ("Reasoning reset" in response) is reset
+
+
+async def test_reasoning_change_busy_maintenance_and_connection_only(spaces, owner, catalog):
+    w, _, second = spaces
+    await w.model_command(owner, "model", "model-a")
+    await w.switch(44, "!repo", str(second))
+    active, _ = stub(w, w.selected(44))
+    await begin(active, replace(owner, channel=44))
+    with pytest.raises(BridgeError, match="active work"):
+        await w.model_command(owner, "reasoning", "high")
+    assert "Supported levels" in await w.model_command(owner, "reasoning")
+    complete(active)
+    await active.worker
+    lease = Lease(w.activity_path)
+    assert lease.acquire()
+    try:
+        with pytest.raises(BridgeError, match="maintenance"):
+            await w.model_command(owner, "reasoning", "high")
+    finally:
+        lease.close()
+    w.connection_only = True
+    assert "Selected reasoning" in await w.model_command(owner, "reasoning")
+    with pytest.raises(BridgeError, match="Connection-only"):
+        await w.model_command(owner, "reasoning", "high")
+
+
+@pytest.mark.parametrize("command, argument", [("reasoning", "low"), ("model", "model-b")])
+async def test_reasoning_and_model_rollback_together_on_write_failure(
+    spaces, owner, catalog, monkeypatch, command, argument
+):
+    w, _, _ = spaces
+    await w.model_command(owner, "model", "model-a")
+    await w.model_command(owner, "reasoning", "xhigh")
+    engine = w.engine(w.selected(33))
+    before = engine.store.path.read_bytes()
+
+    def fail():
+        raise OSError("disk full")
+
+    monkeypatch.setattr(engine, "save", fail)
+    with pytest.raises(OSError):
+        await w.model_command(owner, command, argument)
+    assert (engine.state.model, engine.state.reasoning_effort) == ("model-a", "xhigh")
+    assert engine.store.path.read_bytes() == before
+    lease = Lease(w.activity_path)
+    assert lease.acquire()
+    lease.close()
 
 
 @pytest.fixture

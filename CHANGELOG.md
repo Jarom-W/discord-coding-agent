@@ -1,5 +1,11 @@
 # Release notes
 
+## Unreleased — reasoning selection
+
+Added `/reasoning [LEVEL]` and `!reasoning [LEVEL]` to view the selected model's supported reasoning levels and save a choice per session. `/reasoning default` selects its catalog default. Changes require idle work, preserve history, and are applied and verified before the next task. Model switches retain compatible effort or report a reset to the new model's catalog default. `/models`, `/model`, `!help` and `!status` expose the new controls/settings.
+
+Select a model explicitly before changing reasoning. Existing sessions without an effort selection continue to use Codex defaults. State schema 1 gains an optional `reasoning_effort` field; back up session state before upgrading, and restore a matching backup when rolling back to an older release. No Codex or dependency upgrade is included.
+
 ## 0.4.1 — Repair incomplete standalone Codex installations
 
 The initial M720q guide downloaded the CLI-only asset, which omitted `codex-code-mode-host`. Startup and conversation probes could pass even though the first tool call failed. The guide now installs the checksum-verified complete 0.153.4 package, preserves its helper/search/sandbox/shell layout, and includes a repair that retains existing executable paths, credentials and sessions. The bridge now rejects missing/non-executable native helpers before submitting a task; arbitrary npm/shell wrapper targets are not guessed. An opt-in non-model regression executes JavaScript inside the actual code-mode host.

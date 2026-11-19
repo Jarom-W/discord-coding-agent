@@ -26,6 +26,7 @@ class GatedRpc(Rpc):
         self.calls = []
         self.arrived = {}
         self.gates = {}
+        self.reasoning_mismatch = False
 
     async def start(self, *_):
         self.tasks = [asyncio.create_task(self.respond())]
@@ -67,6 +68,9 @@ class GatedRpc(Rpc):
                         "approvalsReviewer": "user",
                         "sandbox": {"type": "workspaceWrite"},
                         "model": params.get("model", "codex-default"),
+                        "reasoningEffort": "wrong"
+                        if self.reasoning_mismatch
+                        else params.get("config", {}).get("model_reasoning_effort"),
                     }
                 elif method == "turn/start":
                     result = {"turn": {"id": "turn-1", "status": "inProgress"}}
@@ -123,6 +127,44 @@ async def test_selected_model_applies_before_turn_and_keeps_thread(preparation, 
     assert e.verified
     complete(e)
     await e.worker
+
+
+@pytest.mark.parametrize("resume", [False, True])
+@pytest.mark.parametrize("effort", [None, "low", "xhigh"])
+async def test_reasoning_applies_to_thread_and_turn(preparation, owner, resume, effort):
+    e, _, rpc = preparation
+    e.state.model = "chosen-model"
+    e.state.reasoning_effort = effort
+    if not resume:
+        e.state.thread_id = None
+    await e.message(owner, "Inspect the repo")
+    await rpc.wait_for_call("turn/start")
+    thread = next(
+        params
+        for method, params in rpc.calls
+        if method == ("thread/resume" if resume else "thread/start")
+    )
+    turn = next(params for method, params in rpc.calls if method == "turn/start")
+    if effort is None:
+        assert "config" not in thread and "effort" not in turn
+    else:
+        assert thread["config"] == {"model_reasoning_effort": effort}
+        assert turn["effort"] == effort
+    assert e.state.thread_id == "thread-1" and e.verified
+    complete(e)
+    await e.worker
+
+
+async def test_reasoning_mismatch_blocks_prompt_submission(preparation, owner):
+    e, sink, rpc = preparation
+    e.state.model = "chosen-model"
+    e.state.reasoning_effort = "high"
+    rpc.reasoning_mismatch = True
+    await e.message(owner, "Do not submit on mismatch")
+    await e.worker
+    assert not any(method == "turn/start" for method, _ in rpc.calls)
+    assert "requested reasoning level" in sink.texts[-1][0]
+    assert not e.verified and e.state.thread_id == "thread-1"
 
 
 @pytest.fixture
