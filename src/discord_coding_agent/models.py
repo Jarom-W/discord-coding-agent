@@ -1,7 +1,9 @@
 """Read Codex's model picker without creating a thread or starting a turn."""
 
 import asyncio
+import re
 from dataclasses import dataclass
+from typing import TypeGuard
 
 from . import protocol
 from .config import Config, discover_codex
@@ -14,6 +16,12 @@ class Model:
     model: str
     name: str
     default: bool
+    reasoning_efforts: tuple[str, ...]
+    default_reasoning_effort: str
+
+
+def valid_reasoning(value: object) -> TypeGuard[str]:
+    return isinstance(value, str) and re.fullmatch(r"[a-z][a-z0-9_-]{0,63}", value) is not None
 
 
 def valid_model(value: object) -> bool:
@@ -49,8 +57,29 @@ async def list_models(rpc: Rpc) -> list[Model]:
                 raise BridgeError(
                     "Codex returned an invalid model entry. Check doctor and retry /models."
                 )
+            options = item.get("supportedReasoningEfforts")
+            default_effort = item.get("defaultReasoningEffort")
+            if (
+                not isinstance(options, list)
+                or not valid_reasoning(default_effort)
+                or any(
+                    not isinstance(option, dict)
+                    or not valid_reasoning(option.get("reasoningEffort"))
+                    for option in options
+                )
+            ):
+                raise BridgeError(
+                    "Codex returned invalid reasoning options. Retry /models; nothing was changed."
+                )
+            efforts = tuple(dict.fromkeys(option["reasoningEffort"] for option in options))
+            if efforts and default_effort not in efforts:
+                raise BridgeError(
+                    "Codex returned an unsupported default reasoning level. Retry /models; nothing was changed."
+                )
             if not item["hidden"]:
-                models[item["model"]] = Model(item["model"], item["displayName"], item["isDefault"])
+                models[item["model"]] = Model(
+                    item["model"], item["displayName"], item["isDefault"], efforts, default_effort
+                )
         cursor = response.get("nextCursor")
         if cursor is None:
             return list(models.values())

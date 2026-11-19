@@ -48,7 +48,26 @@ def test_legacy_state_without_model_loads_and_retains_history(tmp_path):
         store.path, json.dumps({"schema": 1, "repo_identity": "repo", "thread_id": "old-thread"})
     )
     state = store.load()
-    assert state.model is None and state.thread_id == "old-thread"
+    assert (
+        state.model is None and state.reasoning_effort is None and state.thread_id == "old-thread"
+    )
+
+
+@pytest.mark.parametrize("effort", ["", 1, False, "HIGH", "two words", "bad\nlevel", "x" * 65])
+def test_invalid_saved_reasoning_preserved(tmp_path, effort):
+    store = StateStore(tmp_path, "repo", "manual")
+    store.save(State("repo", model="model-a", reasoning_effort=effort))
+    before = store.path.read_bytes()
+    with pytest.raises(BridgeError, match="corrupt"):
+        store.load()
+    assert store.path.read_bytes() == before
+
+
+def test_reasoning_requires_a_saved_model(tmp_path):
+    store = StateStore(tmp_path, "repo", "manual")
+    store.save(State("repo", reasoning_effort="high"))
+    with pytest.raises(BridgeError, match="corrupt"):
+        store.load()
 
 
 @pytest.mark.parametrize("model", ["", 1, False, "two words", "bad\nmodel", "x" * 201])

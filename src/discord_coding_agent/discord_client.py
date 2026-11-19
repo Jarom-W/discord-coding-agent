@@ -130,6 +130,14 @@ class BridgeClient(discord.Client):
             ),
             guild=guild,
         )
+        self.tree.add_command(
+            app_commands.Command(
+                name="reasoning",
+                description="Show or change this session's Codex reasoning level",
+                callback=self.reasoning_command,
+            ),
+            guild=guild,
+        )
         self.runtime = runtime.current()
         self.store = store
         self.deliveries: dict[int, Delivery] = {}
@@ -203,7 +211,7 @@ class BridgeClient(discord.Client):
         except (discord.HTTPException, OSError, TimeoutError) as exc:
             log_error(log, "discord-command-sync", exc)
             self.delivery.text(
-                "Model slash commands could not be registered. Use !models / !model, and check the bot's applications.commands installation scope."
+                "Model/reasoning slash commands could not be registered. Use !models / !model / !reasoning, and check the bot's applications.commands installation scope."
             )
         self.delivery_started = True
         for delivery in self.deliveries.values():
@@ -364,6 +372,16 @@ class BridgeClient(discord.Client):
             interaction, "model", model.strip() if model is not None else ""
         )
 
+    @app_commands.describe(
+        level="Supported reasoning level, or default; omit to see available levels"
+    )
+    async def reasoning_command(
+        self, interaction: discord.Interaction[Any], level: str | None = None
+    ) -> None:
+        await self.model_interaction(
+            interaction, "reasoning", level.strip() if level is not None else ""
+        )
+
     async def model_interaction(
         self, interaction: discord.Interaction[Any], command: str, argument: str = ""
     ) -> None:
@@ -405,7 +423,7 @@ class BridgeClient(discord.Client):
                 answer = str(exc)
             except Exception as exc:
                 log_error(log, "discord-model-command", exc)
-                answer = "Model command failed. Check /model and the journal before retrying."
+                answer = "Model/reasoning command failed. Check /model, /reasoning and the journal before retrying."
             for page in payloads(answer):
                 await asyncio.wait_for(
                     interaction.followup.send(

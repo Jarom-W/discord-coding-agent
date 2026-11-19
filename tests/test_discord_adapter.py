@@ -25,7 +25,11 @@ def model_interaction(client, guild, channel, command="models", model=None):
             "name": command,
             "guild_id": str(guild.id),
             "type": 1,
-            "options": [] if model is None else [{"name": "model", "type": 3, "value": model}],
+            "options": []
+            if model is None
+            else [
+                {"name": "level" if command == "reasoning" else "model", "type": 3, "value": model}
+            ],
         },
         type=discord.InteractionType.application_command,
         command_failed=False,
@@ -41,7 +45,15 @@ def model_interaction(client, guild, channel, command="models", model=None):
 
 
 @pytest.mark.parametrize(
-    "command, model", [("models", None), ("model", None), ("model", "chosen-model")]
+    "command, model",
+    [
+        ("models", None),
+        ("model", None),
+        ("model", "chosen-model"),
+        ("reasoning", None),
+        ("reasoning", "high"),
+        ("reasoning", "default"),
+    ],
 )
 async def test_native_slash_dispatch_defers_and_routes_selection(connected_client, command, model):
     client, guild, channel = connected_client
@@ -58,6 +70,7 @@ async def test_native_slash_dispatch_defers_and_routes_selection(connected_clien
     assert {c.name for c in client.tree.get_commands(guild=discord.Object(id=22))} == {
         "models",
         "model",
+        "reasoning",
     }
     await client.tree._call(interaction)
     client.workspaces.model_command.assert_awaited_once()
@@ -68,9 +81,10 @@ async def test_native_slash_dispatch_defers_and_routes_selection(connected_clien
 
 
 @pytest.mark.parametrize("invalid", ["owner", "guild", "dm", "thread", "news", "permissions"])
-async def test_slash_authorization_rejects_before_lookup(connected_client, invalid):
+@pytest.mark.parametrize("command", ["models", "reasoning"])
+async def test_slash_authorization_rejects_before_lookup(connected_client, invalid, command):
     client, guild, channel = connected_client
-    interaction = model_interaction(client, guild, channel)
+    interaction = model_interaction(client, guild, channel, command)
     if invalid == "owner":
         interaction.user.id = 99
     elif invalid == "guild":
@@ -84,7 +98,7 @@ async def test_slash_authorization_rejects_before_lookup(connected_client, inval
     else:
         channel.permissions_for.return_value.send_messages = False
     client.workspaces.model_command = AsyncMock()
-    await client.model_interaction(interaction, "models")
+    await client.model_interaction(interaction, command)
     client.workspaces.model_command.assert_not_awaited()
     interaction.followup.send.assert_awaited_once()
 

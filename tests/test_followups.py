@@ -18,6 +18,8 @@ FIXTURES = Path(__file__).parent / "fixtures/codex-0.153.4"
 
 async def test_followups_order_dedup_and_actual_wire_schema(engine, owner):
     e, sink, rpc = engine
+    e.state.model = "chosen-model"
+    e.state.reasoning_effort = "high"
     await begin(e, owner)
     task, worker, start = e.task_id, e.worker, e.started
     for i in range(101, 104):
@@ -33,6 +35,8 @@ async def test_followups_order_dedup_and_actual_wire_schema(engine, owner):
         assert params["expectedTurnId"] == "turn-1" and params["threadId"] == "thread-1"
         assert set(params) == {"threadId", "expectedTurnId", "input"}
     assert sum(method == "turn/start" for method, _ in rpc.calls) == 1
+    assert next(p for method, p in rpc.calls if method == "turn/start")["effort"] == "high"
+    assert e.state.reasoning_effort == "high"
     assert e.worker is worker and e.task_id == task and e.started == start
     assert e.followups.accepted == 3 and not e.pending
     assert "accepted by Codex" in sink.texts[-1][0]

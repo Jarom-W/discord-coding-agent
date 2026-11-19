@@ -129,12 +129,14 @@ async def test_installed_initialize_create_and_resume(tmp_path, mode):
             await protocol.verify_process(rpc, repo, mode)
             catalog = await list_models(rpc)
             assert catalog
-            selected_model = catalog[-1 if restart else 0].model
+            model = catalog[-1 if restart else 0]
+            selected_model = model.model
+            selected_effort = model.reasoning_efforts[-1 if restart else 0]
             response = await rpc.call(
                 "thread/resume" if restart else "thread/start",
-                protocol.thread_params(repo, mode, saved, selected_model),
+                protocol.thread_params(repo, mode, saved, selected_model, selected_effort),
             )
-            thread = protocol.verify_thread(response, repo, mode, selected_model)
+            thread = protocol.verify_thread(response, repo, mode, selected_model, selected_effort)
             # A real idle thread must reject steering, never implicitly start model work.
             with pytest.raises(RpcRejected) as rejection:
                 await rpc.call(

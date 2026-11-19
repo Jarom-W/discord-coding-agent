@@ -146,7 +146,11 @@ async def verify_process(rpc: Rpc, repo: Path, mode: str) -> None:
 
 
 def thread_params(
-    repo: Path, mode: str, thread_id: str | None = None, model: str | None = None
+    repo: Path,
+    mode: str,
+    thread_id: str | None = None,
+    model: str | None = None,
+    reasoning_effort: str | None = None,
 ) -> dict[str, Any]:
     params: dict[str, Any] = {
         "cwd": str(repo),
@@ -158,10 +162,18 @@ def thread_params(
         params.update(threadId=thread_id, excludeTurns=True)
     if model is not None:
         params["model"] = model
+    if reasoning_effort is not None:
+        params["config"] = {"model_reasoning_effort": reasoning_effort}
     return params
 
 
-def verify_thread(response: dict[str, Any], repo: Path, mode: str, model: str | None = None) -> str:
+def verify_thread(
+    response: dict[str, Any],
+    repo: Path,
+    mode: str,
+    model: str | None = None,
+    reasoning_effort: str | None = None,
+) -> str:
     if (
         response.get("approvalsReviewer") != REVIEWERS[mode]
         or response.get("approvalPolicy") != "on-request"
@@ -174,6 +186,10 @@ def verify_thread(response: dict[str, Any], repo: Path, mode: str, model: str | 
     if model is not None and response.get("model") != model:
         raise BridgeError(
             "Codex did not select the requested model. No turn submitted. Use /models and /model to select an available model."
+        )
+    if reasoning_effort is not None and response.get("reasoningEffort") != reasoning_effort:
+        raise BridgeError(
+            "Codex did not select the requested reasoning level. No turn submitted. Use /reasoning to select a supported level."
         )
     thread_id = response.get("thread", {}).get("id")
     if not isinstance(thread_id, str) or not thread_id:

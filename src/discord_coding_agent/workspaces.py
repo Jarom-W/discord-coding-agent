@@ -20,7 +20,7 @@ from .diagnostics import Diagnostics, host_report
 from .engine import HELP, Engine, Origin, Pending, Sink
 from .errors import BridgeError
 from .locks import Lease
-from .models import Model, discover_models, valid_model
+from .models import Model, discover_models, valid_model, valid_reasoning
 from .state import StateStore, atomic_write, backup
 
 MAX_CHANNELS = 8
@@ -429,18 +429,39 @@ class Workspaces:
         if not selected:
             raise BridgeError("Select a repository in this channel first with !repo PATH.")
         engine = self.engine(selected)
-        heading = f"Session: {selected.name}\nSelected model: {engine.state.model or 'Codex default (configured or saved thread model)'}"
+        heading = (
+            f"Session: {selected.name}\nSelected model: {engine.state.model or 'Codex default (configured or saved thread model)'}\n"
+            f"Selected reasoning: {engine.state.reasoning_effort or 'Codex default (configured or saved thread effort)'}"
+        )
         if command == "model" and not argument:
             return (
                 heading + "\nUse /models to list models, then /model MODEL to change this session."
             )
-        if command not in {"model", "models"} or (command == "models" and argument):
-            raise BridgeError("Use /models or /model MODEL (also !models and !model MODEL).")
+        if command not in {"model", "models", "reasoning"} or (command == "models" and argument):
+            raise BridgeError(
+                "Use /models, /model MODEL or /reasoning [LEVEL] (also available with !)."
+            )
+        if command == "reasoning":
+            argument = argument.lower()
+            if argument and not valid_reasoning(argument):
+                raise BridgeError(
+                    "Use /reasoning with a supported level or default. Nothing was changed."
+                )
+            if not engine.state.model:
+                guidance = "Select a model first with /model MODEL; /models lists each model's supported reasoning levels."
+                if argument:
+                    raise BridgeError(guidance + " Nothing was changed.")
+                return heading + "\n" + guidance
         if command == "model" and not valid_model(argument):
             raise BridgeError(
                 "Use /model with an exact model ID from /models. Nothing was changed."
             )
         if self.connection_only:
+            if command == "reasoning" and not argument:
+                return (
+                    heading
+                    + "\nRestart without --connection-only to list supported reasoning levels."
+                )
             raise BridgeError(
                 "Connection-only mode: no Codex process invoked. Restart without --connection-only to list or change models."
             )
@@ -448,9 +469,9 @@ class Workspaces:
             raise BridgeError("A model lookup is already in progress. Wait and retry.")
         lease = Lease(self.activity_path)
         try:
-            if command == "model" and (self.active() or not lease.acquire()):
+            if argument and (self.active() or not lease.acquire()):
                 raise BridgeError(
-                    "Cannot change models during active work or maintenance. Wait or use !stop; nothing was changed."
+                    "Cannot change models or reasoning during active work or maintenance. Wait or use !stop; nothing was changed."
                 )
             self.model_lookup = asyncio.create_task(
                 discover_models(engine.config, engine.state.mode)
@@ -461,27 +482,60 @@ class Workspaces:
                     f"- `{model.model}` — {model.name}"
                     + (" (catalog default)" if model.default else "")
                     + (" (selected)" if model.model == engine.state.model else "")
+                    + f"\n  Reasoning: {', '.join(model.reasoning_efforts) or 'no selectable levels'}; default: {model.default_reasoning_effort}"
                     for model in models
                 ]
                 return (
                     heading
                     + "\n\nAvailable Codex models:\n"
                     + ("\n".join(rows) or "No models returned by Codex.")
-                    + "\n\nUse /model MODEL to select an ID above. Changes apply to the next task."
+                    + "\n\nUse /model MODEL to select an ID above, then /reasoning LEVEL. Changes apply to the next task."
                 )
-            if argument not in {model.model for model in models}:
+            model_id = argument if command == "model" else engine.state.model
+            model = next((model for model in models if model.model == model_id), None)
+            if model is None:
                 raise BridgeError(
                     "Unknown or unavailable model. Use /models and copy an exact model ID; nothing was changed."
                 )
-            previous = engine.state.model
-            engine.state.model = argument
+            if command == "reasoning" and not argument:
+                return (
+                    heading
+                    + f"\nSupported levels: {', '.join(model.reasoning_efforts) or 'none'}\n"
+                    f"Catalog default: {model.default_reasoning_effort}. Use /reasoning LEVEL or /reasoning default."
+                )
+            previous = engine.state.model, engine.state.reasoning_effort
+            notice = ""
+            if command == "reasoning":
+                effort = model.default_reasoning_effort if argument == "default" else argument
+                if effort not in model.reasoning_efforts:
+                    raise BridgeError(
+                        f"Unsupported reasoning level for {model.model}. Supported: {', '.join(model.reasoning_efforts) or 'none'}. Nothing was changed."
+                    )
+                engine.state.reasoning_effort = effort
+            else:
+                if (
+                    engine.state.reasoning_effort is not None
+                    and engine.state.reasoning_effort not in model.reasoning_efforts
+                ):
+                    if model.default_reasoning_effort not in model.reasoning_efforts:
+                        raise BridgeError(
+                            "This model advertises no selectable reasoning levels. Use !new for a session with Codex defaults before selecting it; nothing was changed."
+                        )
+                    engine.state.reasoning_effort = model.default_reasoning_effort
+                    notice = f" Reasoning reset to {model.default_reasoning_effort}, this model's catalog default; {previous[1]} is not supported."
+                engine.state.model = argument
             try:
                 engine.save()
             except BaseException:
-                engine.state.model = previous
+                engine.state.model, engine.state.reasoning_effort = previous
                 raise
             engine.verified = False
-            return f"Session: {selected.name}\nSelected model: {argument}. Saved for the next task; conversation history is preserved."
+            return (
+                f"Session: {selected.name}\nSelected model: {engine.state.model}\n"
+                f"Selected reasoning: {engine.state.reasoning_effort or 'Codex default'}."
+                + notice
+                + " Saved for the next task; conversation history is preserved."
+            )
         finally:
             lease.close()
 
@@ -670,7 +724,7 @@ class Workspaces:
                 )
             elif cmd in {"!repo", "!session", "!name", "!new"}:
                 sink.text(await self.switch(origin.channel, cmd, argument))
-            elif cmd in {"!models", "!model"}:
+            elif cmd in {"!models", "!model", "!reasoning"}:
                 sink.text(await self.model_command(origin, cmd[1:], argument))
             elif cmd == "!sessions":
                 selected = self.selected(origin.channel)

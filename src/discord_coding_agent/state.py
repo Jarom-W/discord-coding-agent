@@ -3,6 +3,7 @@
 import fcntl
 import json
 import os
+import re
 import shutil
 import tempfile
 import time
@@ -56,6 +57,7 @@ class State:
     schema: int = 1
     thread_id: str | None = None
     model: str | None = None
+    reasoning_effort: str | None = None
     interrupted: bool = False
     active: dict[str, Any] | None = None
     last_interruption: dict[str, Any] | None = None
@@ -122,6 +124,12 @@ class StateStore:
                 or not 1 <= len(state.model) <= 200
                 or not state.model.isprintable()
                 or any(char.isspace() or char == "`" for char in state.model)
+            ):
+                raise ValueError()
+            if state.reasoning_effort is not None and (
+                not isinstance(state.reasoning_effort, str)
+                or re.fullmatch(r"[a-z][a-z0-9_-]{0,63}", state.reasoning_effort) is None
+                or state.model is None
             ):
                 raise ValueError()
             for record in [state.active, state.last_interruption]:

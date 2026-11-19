@@ -17,6 +17,8 @@ Only the configured owner in the configured server can invoke commands. The init
 | `!status full` | Add initialization/RPC budgets, task ID, last saved task failure and any interrupted follow-up metadata. |
 | `/models` or `!models` | List the current Codex model catalog, with exact selectable IDs and the saved selection. No model turn. |
 | `/model [MODEL]` or `!model [MODEL]` | Show the saved selection, or validate and save an exact model ID for this session's next task. Changes are idle-only. |
+| `/reasoning [LEVEL]` or `!reasoning [LEVEL]` | Show this session's reasoning choice and the selected model's supported levels, or save a supported level for the next task. Select a model first with `/model`. Changes are idle-only. |
+| `/reasoning default` or `!reasoning default` | Save the selected model's current catalog default reasoning level. |
 | `!run 30m task text` | Submit a task with a bridge-enforced deadline. Use a positive number followed by `s`, `m` or `h` (e.g. `90s`, `30m`, `1.5h`). Overrides the configured default for this task only. |
 | `!run unlimited task text` | Submit a task with no full-task deadline, overriding the configured default for this task only. |
 | `!dirs [PATH]` | List allowed workspace roots, or immediate directories under a root. No file contents/model call. |
@@ -57,6 +59,16 @@ Selections belong to the current saved session, survive restart, and remain atta
 Changing the selection requires all coding work to be idle and maintenance to release its lock. The change keeps the thread and history, applies to the next task, and is checked against Codex's effective thread response before submitting the prompt. Unknown IDs and failed lookups leave the previous choice intact. Existing follow-ups keep the active task's model.
 
 Slash commands respond privately to the owner inside Discord; the `!` aliases reply in the channel. All responses stay inline and long lists are paged. Use a bound normal text channel in the configured server; bind additional channels with `!repo PATH`. In connection-only mode you can inspect a saved selection, but listing and changing models require a normal restart. See [Discord command registration](discord.md#model-slash-commands) if slash commands are missing.
+
+### Reasoning level
+
+Select a model with `/model MODEL`, then run `/reasoning` to see its supported levels and catalog default. `/models` also lists reasoning options for every model. For example, use `/reasoning high` if `high` is listed. Levels come from Codex's catalog and can differ between models; the bridge does not maintain a fixed list. Level arguments are case-insensitive. `!reasoning` provides the same controls using text commands.
+
+Changes persist in the selected session, survive restarts, and take effect on its next task. They require idle work across all channels and no active maintenance. Conversation history stays intact; live follow-ups retain the running task's effort. The bridge applies the setting on thread creation/resume, verifies Codex's response before submitting the prompt, and sends the same effort on `turn/start`. Invalid or unavailable levels leave the saved choice unchanged.
+
+`/reasoning default` saves the model's advertised default as a concrete level (for example, `medium`); it does not resume inheriting local configuration. When switching models, a supported reasoning choice is preserved. An incompatible choice is reset to the new model's catalog default with an explicit confirmation. If a model advertises no selectable levels, switching from an explicit reasoning choice is refused; use a new session to select that model with Codex defaults.
+
+New and existing sessions without a reasoning selection continue to inherit Codex's configured or saved-thread effort. `/model` and `!status` show the saved choice. Choosing a model explicitly before changing effort avoids guessing which model an existing default session uses. In connection-only mode, `/reasoning` shows the saved choice; querying supported options or changing the choice requires normal operation.
 
 ## Local CLI — on the host
 
